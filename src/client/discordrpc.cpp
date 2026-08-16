@@ -53,12 +53,28 @@ DiscordRPC::~DiscordRPC()
 
 void DiscordRPC::init(const std::string &client_id)
 {
+#ifdef __ANDROID__
+	// Discord Rich Presence talks to a local Discord *desktop* client
+	// over IPC (named pipe on Windows, Unix domain socket elsewhere) --
+	// there's nothing listening on that socket on a phone. Left enabled,
+	// this would just retry a doomed connection every couple of seconds
+	// forever (see poll()'s reconnect logic below), burning battery/CPU
+	// and socket syscalls for a feature that can never actually do
+	// anything on this platform. Every other DiscordRPC method already
+	// guards on m_configured/m_enabled/m_connected, so leaving those
+	// false here is enough to make the whole class a safe no-op --
+	// nothing else needs an Android-specific check.
+	m_configured = false;
+	m_enabled = false;
+	return;
+#else
 	m_client_id = client_id;
 	m_configured = !client_id.empty();
 	m_enabled = m_configured && g_settings->getBool("discord_rpc_enabled");
 	m_next_reconnect_attempt_ms = 0; // try immediately
 	if (m_enabled)
 		connectPipe();
+#endif
 }
 
 void DiscordRPC::shutdown()

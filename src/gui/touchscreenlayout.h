@@ -33,6 +33,23 @@ enum touch_gui_button_id : u8
 	inventory_id,
 	drop_id,
 	exit_id,
+	mineboost_menu_id,
+
+	// Dedicated LMB/RMB buttons -- an alternative to the tap-gesture dig/
+	// place system (see TouchControls::applyContextControls()). Held down
+	// like a real mouse button instead of relying on short-tap/long-tap
+	// timing; bypasses the keymap system entirely and goes straight to
+	// TouchControls::emitMouseEvent() (see buttonEmitAction() special
+	// case). Off-layout by default -- opt in via the overflow menu/editor,
+	// same as chat_id etc above.
+	lmb_id,
+	rmb_id,
+
+	// Toggles continuous forward movement, same as the (by default
+	// unbound-on-desktop) "keymap_autoforward" key -- see
+	// defaultsettings.cpp for why touch builds get a real default bind
+	// for it (mayAddButton() hides this button entirely if unbound).
+	autoforward_id,
 
 	// formerly "settings bar"
 	fly_id,

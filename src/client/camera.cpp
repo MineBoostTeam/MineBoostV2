@@ -877,14 +877,6 @@ void Camera::drawNametags()
 
 			std::wstring display_text =
 				translate_string(utf8_to_wide(nametag->text));
-			if (is_friend) {
-				f32 distance = (pos - (m_camera_position -
-					intToFloat(m_camera_offset, BS))).getLength() / BS;
-				std::wstring suffix =
-					L" [" + std::to_wstring((int)distance) + L"m]";
-				nametag_colorless += suffix;
-				display_text += suffix;
-			}
 
 			core::dimension2d<u32> textsize = font->getDimension(
 				nametag_colorless.c_str());
@@ -910,84 +902,6 @@ void Camera::drawNametags()
 	}
 }
 
-void Camera::drawFriendESP()
-{
-	const auto &friends = FriendList::get().getAll();
-	if (friends.empty())
-		return; // Nothing to do, avoid the active object scan below.
-
-	core::matrix4 trans = m_cameranode->getProjectionMatrix();
-	trans *= m_cameranode->getViewMatrix();
-
-	video::IVideoDriver *driver = RenderingEngine::get_video_driver();
-	v2u32 screensize = driver->getScreenSize();
-
-	static const video::SColor box_outline(255, 60, 230, 110);
-	static const video::SColor box_fill(60, 60, 230, 110);
-
-	// Projects a world position to screen space. Returns false if the
-	// point lies behind the camera.
-	auto project = [&](const v3f &pos, v2s32 &out) -> bool {
-		f32 transformed_pos[4] = { pos.X, pos.Y, pos.Z, 1.0f };
-		trans.multiplyWith1x4Matrix(transformed_pos);
-		if (transformed_pos[3] <= 0)
-			return false;
-		f32 zDiv = transformed_pos[3] == 0.0f ? 1.0f : core::reciprocal(transformed_pos[3]);
-		out.X = screensize.X * (0.5f * transformed_pos[0] * zDiv + 0.5f);
-		out.Y = screensize.Y * (0.5f - transformed_pos[1] * zDiv * 0.5f);
-		return true;
-	};
-
-	std::unordered_map<u16, ClientActiveObject*> objects;
-	m_client->getEnv().getAllActiveObjects(objects);
-
-	for (const auto &pair : objects) {
-		ClientActiveObject *obj = pair.second;
-		GenericCAO *cao = dynamic_cast<GenericCAO*>(obj);
-		if (!cao || !cao->isPlayer())
-			continue;
-
-		if (!FriendList::get().isFriend(cao->getName()))
-			continue;
-
-		v3f base_pos = cao->getPosition() - intToFloat(m_camera_offset, BS);
-
-		// Project the corners of the player's selection box to screen
-		// space and highlight it, so friends stand out clearly even
-		// through walls.
-		aabb3f box(v3f(0.0f, 0.0f, 0.0f), v3f(0.0f, 0.0f, 0.0f));
-		if (!cao->getSelectionBox(&box))
-			continue;
-
-		v2s32 min_pt(0x7fffffff, 0x7fffffff);
-		v2s32 max_pt(-0x7fffffff, -0x7fffffff);
-		bool any_corner_visible = false;
-
-		for (int i = 0; i < 8; i++) {
-			v3f corner(
-				(i & 1) ? box.MaxEdge.X : box.MinEdge.X,
-				(i & 2) ? box.MaxEdge.Y : box.MinEdge.Y,
-				(i & 4) ? box.MaxEdge.Z : box.MinEdge.Z);
-			v2s32 screen_pt;
-			if (!project(base_pos + corner, screen_pt))
-				continue;
-			any_corner_visible = true;
-			min_pt.X = std::min(min_pt.X, screen_pt.X);
-			min_pt.Y = std::min(min_pt.Y, screen_pt.Y);
-			max_pt.X = std::max(max_pt.X, screen_pt.X);
-			max_pt.Y = std::max(max_pt.Y, screen_pt.Y);
-		}
-
-		if (!any_corner_visible)
-			continue;
-
-		core::rect<s32> box_rect(min_pt.X, min_pt.Y, max_pt.X, max_pt.Y);
-		box_rect.repair();
-		driver->draw2DRectangle(box_fill, box_rect);
-		driver->draw2DRectangleOutline(box_rect, box_outline, 2);
-	}
-}
-
 void Camera::drawMineBoostBadges()
 {
 	// ITextureSource::getTexture() caches internally (and, unlike a raw
@@ -1001,6 +915,17 @@ void Camera::drawMineBoostBadges()
 	// spamming it every single frame from then on.
 	video::ITexture *badge_tex = m_client->getTextureSource()->getTexture("mineboostv2_badge.png");
 	if (!badge_tex)
+		return;
+
+	// Avoid the getAllActiveObjects() scan below (rebuilds a fresh
+	// unordered_map of every loaded entity/player, every frame) on the
+	// common case of nobody having ever been seen -- presence disabled,
+	// mod-channel not enabled server-side, or no other MineBoost players
+	// around yet. This was the same guard drawFriendESP() used to have
+	// (see FriendList::empty() there) before it was removed; badges kept
+	// running the full scan unconditionally, which is the main per-frame
+	// cost this function adds over stock Luanti.
+	if (MineBoostPresence::get().empty())
 		return;
 
 	core::matrix4 trans = m_cameranode->getProjectionMatrix();
@@ -1023,8 +948,8 @@ void Camera::drawMineBoostBadges()
 		if (!MineBoostPresence::get().isMineBoostUser(cao->getName(), now_ms))
 			continue;
 
-		// Same "top of the player's own selection box" positioning
-		// drawFriendESP() above uses -- deliberately not GenericCAO::
+		// "Top of the player's own selection box" positioning --
+		// deliberately not GenericCAO::
 		// updateNametag()'s m_prop.selectionbox/m_prop.nametag, which a
 		// server (or a mod) can and does blank out to hide the floating
 		// nametag text. Since the badge doesn't depend on nametag text

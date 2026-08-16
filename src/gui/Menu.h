@@ -164,7 +164,6 @@ public:
         settings.push_back({"CraftHUD", "craft_hud", SettingCategory::GUI});
         // settings.push_back({"ArmorHUD", "armor_hud", SettingCategory::GUI}); // ArmorHUD temporarily disabled
 
-        settings.push_back({"Fullbright", "fullbright", SettingCategory::RENDER});
         settings.push_back({"Water Effect", "small_post_effect_color", SettingCategory::RENDER});
         settings.push_back({"Node \n illumination", "node_illumination", SettingCategory::RENDER});
         settings.push_back({"Display sunrise", "display_sunrise", SettingCategory::RENDER});
@@ -173,8 +172,6 @@ public:
         settings.push_back({"Sky color","use_custom_sky_color", SettingCategory::RENDER});
         settings.push_back({"Particles", "particles", SettingCategory::RENDER});
 
-        settings.push_back({"Fast place", "fast_place", SettingCategory::MISC, {Types::Boolean, 43, 124, "data"}});
-        settings.push_back({"NoFriend \n Damage", "no_friend_damage", SettingCategory::MISC});
         settings.push_back({"TargetHUD", "target_hud", SettingCategory::GUI});
         settings.push_back({"TargedESP", "target_highlight_particles", SettingCategory::RENDER});
         settings.push_back({"PhotoHUD", "photo_hud", SettingCategory::GUI});

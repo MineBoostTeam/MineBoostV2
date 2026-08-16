@@ -762,6 +762,23 @@ void Menu::updateHudSizeScrollBarPosition(gui::IGUIScrollBar* scrollbar, int scr
     scrollbar->setRelativePosition(core::rect<s32>(left, top, right, bottom));
 }
 
+void Menu::updatePlaceCooldownScrollBarPosition(gui::IGUIScrollBar* scrollbar, int screenW, int screenH)
+{
+    if (!scrollbar) return;
+    const int SCROLL_WIDTH = 300;
+    const int SCROLL_HEIGHT = 20;
+    const int TOP_OFFSET = 225; // 6th row: Place Cooldown
+    int bgLeft = (screenW - WIDTH_) / 2;
+    int bgTop = (screenH - HEIGHT_) / 2;
+    int left = bgLeft + (WIDTH_ - SCROLL_WIDTH) / 2;
+    int top = bgTop + TOP_OFFSET;
+    int right = left + SCROLL_WIDTH;
+    int bottom = top + SCROLL_HEIGHT;
+    placeCooldownScrollbarTop = top;
+
+    scrollbar->setRelativePosition(core::rect<s32>(left, top, right, bottom));
+}
+
 Menu::Menu(gui::IGUIEnvironment* env,
     gui::IGUIElement* parent,
     s32 id, IMenuManager* menumgr,
@@ -830,6 +847,18 @@ Menu::Menu(gui::IGUIEnvironment* env,
     hud_size_scrollbar->setLargeStep(1);
     hud_size_scrollbar->setPos((s32)(g_settings->getFloat("hud_size") * 100));
     hud_size_scrollbar->setVisible(false);
+
+    // Place-repeat cooldown (see fast_place removal): stored on the
+    // slider as whole milliseconds, 1-2000, mapped to "repeat_place_time"
+    // (0.001s-2.0s) by dividing by 1000 in draw().
+    place_cooldown_scrollbar = env->addScrollBar(true, core::rect<s32>((screenW - 300) / 2 + (-45), screenH - 290 + (-85),
+        (screenW + 300) / 2 + (-45), screenH - 270 + (-85)), nullptr, 110);
+    place_cooldown_scrollbar->setMax(2000);
+    place_cooldown_scrollbar->setMin(1);
+    place_cooldown_scrollbar->setSmallStep(1);
+    place_cooldown_scrollbar->setLargeStep(10);
+    place_cooldown_scrollbar->setPos((s32)(g_settings->getFloat("repeat_place_time") * 1000));
+    place_cooldown_scrollbar->setVisible(false);
 
     // "Photo HUD" picker panel -- right-clicking the Photo HUD tile opens
     // a small image picker over the main settings list (see
@@ -1179,6 +1208,7 @@ void Menu::ItemsInit(SettingCategory category)
     hitparticle_scrollbar->setVisible(show_scrollbars);
     target_particle_scrollbar->setVisible(show_scrollbars);
     hud_size_scrollbar->setVisible(show_scrollbars);
+    place_cooldown_scrollbar->setVisible(show_scrollbars);
 
     for (size_t i = 0; i < settings.size(); ++i) {
         if (settings[i].category == category) {
@@ -1278,6 +1308,7 @@ void Menu::create()
         hitparticle_scrollbar->setVisible(true);
         target_particle_scrollbar->setVisible(true);
         hud_size_scrollbar->setVisible(true);
+        place_cooldown_scrollbar->setVisible(true);
     }
     closePhotoSettings();
     closeHandViewSettings();
@@ -1317,6 +1348,7 @@ void Menu::close()
     hitparticle_scrollbar->setVisible(false);
     target_particle_scrollbar->setVisible(false);
     hud_size_scrollbar->setVisible(false);
+    place_cooldown_scrollbar->setVisible(false);
     closePhotoSettings();
     closeHandViewSettings();
     closeColorsPanel();
@@ -1572,6 +1604,7 @@ void Menu::openColorsPanel()
     hitparticle_scrollbar->setVisible(false);
     target_particle_scrollbar->setVisible(false);
     hud_size_scrollbar->setVisible(false);
+    place_cooldown_scrollbar->setVisible(false);
 
     core::rect<s32> panel = getColorsPanelRect();
     std::vector<ColorTarget> targets = getColorTargets();
@@ -1633,6 +1666,7 @@ void Menu::closeColorsPanel()
         hitparticle_scrollbar->setVisible(true);
         target_particle_scrollbar->setVisible(true);
         hud_size_scrollbar->setVisible(true);
+        place_cooldown_scrollbar->setVisible(true);
     }
 
     Environment->setFocus(this);
@@ -2275,6 +2309,7 @@ void Menu::draw()
     updateHitParticleScrollBarPosition(hitparticle_scrollbar, screenW, screenH);
     updateTargetParticleScrollBarPosition(target_particle_scrollbar, screenW, screenH);
     updateHudSizeScrollBarPosition(hud_size_scrollbar, screenW, screenH);
+    updatePlaceCooldownScrollBarPosition(place_cooldown_scrollbar, screenW, screenH);
 
     if (isOpen) {
         hud_move_button.draw(driver);
@@ -2657,6 +2692,30 @@ void Menu::draw()
             g_settings->setS32("hit_particle_amount", hitparticle_scrollbar->getPos());
             g_settings->setS32("target_highlight_particle_amount", target_particle_scrollbar->getPos());
             g_settings->setFloat("hud_size", hud_size_scrollbar->getPos() / 100.0f);
+            // Written as a plain "sec.millis" string rather than
+            // g_settings->setFloat() -- setFloat() goes through ftos(),
+            // which serializes with max_digits10 precision to round-trip
+            // exactly, and most /1000 fractions (0.001, 0.005, 1.005...)
+            // aren't exactly representable in binary float, so that
+            // comes out as noise like "0.00100000005" in minetest.conf
+            // instead of the clean "0.001" the slider actually means.
+            //
+            // Only actually written when the value changed: this setting
+            // has a registered changed-callback (Game::readSettings(), so
+            // the cooldown updates live), and g_settings->set() fires
+            // that unconditionally on every call -- writing every frame
+            // regardless of whether anything moved meant a full
+            // Game::readSettings() re-parse every frame this menu was
+            // open, not just while the slider was actually being dragged.
+            {
+                s32 place_cd_ms = place_cooldown_scrollbar->getPos();
+                if (place_cd_ms != placeCooldownLastWrittenMs) {
+                    char buf[32];
+                    snprintf(buf, sizeof(buf), "%d.%03d", place_cd_ms / 1000, place_cd_ms % 1000);
+                    g_settings->set("repeat_place_time", buf);
+                    placeCooldownLastWrittenMs = place_cd_ms;
+                }
+            }
 
             if (current_category == SettingCategory::Scrollbars) {
                 std::wstring wfov = std::wstring_convert<std::codecvt_utf8<wchar_t>>().from_bytes("FOV: " + std::to_string(int(g_settings->getFloat("fov_custom.data"))));
@@ -2680,6 +2739,23 @@ void Menu::draw()
                 std::wstring whudsize = std::wstring_convert<std::codecvt_utf8<wchar_t>>().from_bytes("HUD Size: " + std::to_string(int(hud_size_scrollbar->getPos())) + "%");
                 font->draw(whudsize.c_str(), core::rect<s32>(((screenW - 300) / 2 + (-45)) * 1.72 - offsetX, hudSizeScrollbarTop,
                 (screenW + 300) / 2 + (-45) - offsetX, hudSizeScrollbarTop + 20), video::SColor(255, 255, 255, 255));
+
+                // Format straight from the integer millisecond position
+                // (never go through float division here) so the label
+                // is always an exact "0.001s"/"1.005s"/"2.000s" instead
+                // of a binary-float rounding artifact like
+                // "0.00100500...". The actual g_settings write above
+                // still goes through getFloat()/setFloat() -- 32-bit
+                // float has plenty of precision for a value that's only
+                // ever read back as milliseconds -- this only affects
+                // the displayed text.
+                s32 place_cd_ms = place_cooldown_scrollbar->getPos();
+                char place_cd_buf[32];
+                snprintf(place_cd_buf, sizeof(place_cd_buf), "Place CD: %d.%03ds",
+                    place_cd_ms / 1000, place_cd_ms % 1000);
+                std::wstring wplacecd = std::wstring_convert<std::codecvt_utf8<wchar_t>>().from_bytes(place_cd_buf);
+                font->draw(wplacecd.c_str(), core::rect<s32>(((screenW - 300) / 2 + (-45)) * 1.72 - offsetX, placeCooldownScrollbarTop,
+                (screenW + 300) / 2 + (-45) - offsetX, placeCooldownScrollbarTop + 20), video::SColor(255, 255, 255, 255));
             }
         }
     } else {
@@ -2688,6 +2764,7 @@ void Menu::draw()
         hitparticle_scrollbar->setVisible(false);
         target_particle_scrollbar->setVisible(false);
         hud_size_scrollbar->setVisible(false);
+        place_cooldown_scrollbar->setVisible(false);
         if (photo_settings_open)
             closePhotoSettings();
         if (handview_settings_open)
@@ -2705,6 +2782,7 @@ Menu::~Menu()
     if (hitparticle_scrollbar) hitparticle_scrollbar->remove();
     if (target_particle_scrollbar) target_particle_scrollbar->remove();
     if (hud_size_scrollbar) hud_size_scrollbar->remove();
+    if (place_cooldown_scrollbar) place_cooldown_scrollbar->remove();
     if (handview_offset_x_scrollbar) handview_offset_x_scrollbar->remove();
     if (handview_offset_y_scrollbar) handview_offset_y_scrollbar->remove();
     if (handview_offset_z_scrollbar) handview_offset_z_scrollbar->remove();

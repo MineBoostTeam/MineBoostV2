@@ -306,6 +306,17 @@ if(WIN32)
 		# package: on MSYS2 CLANG64, `pacman -S mingw-w64-clang-x86_64-cppwinrt`
 		# (or the mingw64/ucrt64 equivalent for other MSYS2 environments).
 		#
+		# Our CI cross-compiles with llvm-mingw instead of MSYS2, which has
+		# no such package -- util/buildbot/{buildwin32,buildwin64}.sh fetch
+		# the same headers directly from Microsoft's "Microsoft.Windows.
+		# CppWinRT" NuGet package instead and pass their location here.
+		set(MINEBOOST_CPPWINRT_INCLUDE_DIR "" CACHE PATH
+			"Extra include dir for C++/WinRT headers (winrt/base.h etc), for toolchains without them built in")
+		if(MINEBOOST_CPPWINRT_INCLUDE_DIR)
+			include_directories(${MINEBOOST_CPPWINRT_INCLUDE_DIR})
+			list(APPEND CMAKE_REQUIRED_INCLUDES ${MINEBOOST_CPPWINRT_INCLUDE_DIR})
+		endif()
+		#
 		# winrt/base.h unconditionally requires native coroutine support
 		# (even though nowplaying.cpp itself never uses co_await), which
 		# only exists under C++20 -- the project otherwise targets C++17.

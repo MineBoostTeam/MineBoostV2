@@ -122,7 +122,7 @@ void set_default_settings()
 	// full protocol. The client POSTs to "<this>/presence" (see
 	// MineBoostPresence::step() in src/client/mineboost_presence.cpp) --
 	// no trailing slash here, that's added there.
-	settings->setDefault("mineboost_presence_server_url", "https://node-server--Pryanilk.replit.app");
+	settings->setDefault("mineboost_presence_server_url", "https://project--Pryanilk.replit.app");
 	settings->setDefault("curl_verify_cert", "true");
 	settings->setDefault("enable_remote_media_server", "true");
 	settings->setDefault("enable_client_modding", "true");
@@ -136,7 +136,12 @@ void set_default_settings()
 	// Keymap
 	settings->setDefault("remote_port", "30000");
 	settings->setDefault("keymap_forward", "KEY_KEY_W");
-	settings->setDefault("keymap_autoforward", "");
+	// Left unbound on desktop by default (matches upstream), but touch
+	// builds need a real bind here or the new autoforward_id touch
+	// button (see touchscreenlayout.h) gets hidden entirely --
+	// mayAddButton() in touchcontrols.cpp refuses to create a button
+	// for an unbound key. Same reasoning as "keymap_rangeselect" below.
+	settings->setDefault("keymap_autoforward", has_touch ? "KEY_KEY_G" : "");
 	settings->setDefault("keymap_backward", "KEY_KEY_S");
 	settings->setDefault("keymap_left", "KEY_KEY_A");
 	settings->setDefault("keymap_right", "KEY_KEY_D");
@@ -174,7 +179,6 @@ void set_default_settings()
 	settings->setDefault("keymap_sprite_manager", "");
 	settings->setDefault("keymap_toggle_left_hand", "KEY_KEY_F");
 	settings->setDefault("keymap_menu", "KEY_RSHIFT");
-	settings->setDefault("keymap_macro_wheel", "KEY_TAB");
 #ifndef NDEBUG
 	settings->setDefault("keymap_toggle_update_camera", "KEY_F4");
 #else
@@ -397,13 +401,6 @@ void set_default_settings()
 	settings->setDefault("chat_x", "10");
 	settings->setDefault("chat_y", "0");
 
-	settings->setDefault("fullbright", "false");
-	settings->setDefault("fast_place", "false");
-	// NoFriendDamage: suppresses the actual punch/damage packet when the
-	// thing you're hitting is a player on your .friend list (client-side
-	// friend list, see src/client/friendlist.h) -- see the punch_is_protected_friend
-	// check in Game::handlePointingAtObject() in src/client/game.cpp.
-	settings->setDefault("no_friend_damage", "false");
 	settings->setDefault("node_illumination", "false");
 	settings->setDefault("node_color", "(255, 0, 0)");
 	settings->setDefault("target_hud", "true");
@@ -442,7 +439,6 @@ void set_default_settings()
 	settings->setDefault("fov_custom.data", "75");
 	settings->setDefault("show_fps", "true");
 	settings->setDefault("show_ping", "true");
-	settings->setDefault("fast_place_value", "0.16");
 	settings->setDefault("left_hand", "true");
 
 	// Per-HUD-element outline color customization (MineBoost). Each only

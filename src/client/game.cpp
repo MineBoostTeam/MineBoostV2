@@ -10,7 +10,6 @@
 #include "camera.h"
 #include "client.h"
 #include "friendlist.h"
-#include "macrolist.h"
 #include "client/clientevent.h"
 #include "client/gameui.h"
 #include "client/game_formspec.h"
@@ -554,7 +553,6 @@ protected:
 	void processUserInput(f32 dtime);
 	void processKeyInput();
 	void processItemSelection(u16 *new_playeritem);
-	void processMacroWheel(f32 dtime);
 	bool shouldShowTouchControls();
 
 	void dropSelectedItem(bool single_item = false);
@@ -634,13 +632,6 @@ protected:
 	static void settingChangedCallback(const std::string &setting_name, void *data);
 	void readSettings();
 
-	// Fullbright bakes its effect directly into block meshes at build
-	// time (see mapblock_mesh.cpp), rather than applying it per-frame via
-	// a shader uniform, so toggling it needs every already-built chunk to
-	// be re-meshed for the change to actually show up on screen.
-	static void fullbrightChangedCallback(const std::string &setting_name, void *data);
-	void remeshAllBlocks();
-
 	inline bool isKeyDown(GameKeyType k)
 	{
 		return input->isKeyDown(k);
@@ -710,6 +701,19 @@ private:
 	std::string m_discord_last_large_text_sent;
 	bool m_discord_last_hidden = false;
 	bool m_discord_configured = false;
+
+	// Cached copies of the discord_rpc_* settings, refreshed only by
+	// readSettings() (called via settingChangedCallback whenever any of
+	// them actually changes -- see the registerChangedCallback() calls
+	// in the constructor). updateDiscordActivity() runs every single
+	// frame, so re-parsing these straight out of g_settings there (a
+	// string get() + str_split() allocating a fresh vector, every
+	// frame, whether or not Discord is even in use) was needless
+	// per-frame overhead; this trades it for one refresh per actual
+	// settings change instead.
+	std::vector<std::string> m_cache_discord_hidden_servers;
+	bool m_cache_discord_show_playing;
+	bool m_cache_discord_show_nickname;
 
 	bool nodePlacement(const ItemDefinition &selected_def, const ItemStack &selected_item,
 		const v3s16 &nodepos, const v3s16 &neighborpos, const PointedThing &pointed,
@@ -886,8 +890,12 @@ Game::Game() :
 		&settingChangedCallback, this);
 	g_settings->registerChangedCallback("pause_on_lost_focus",
 		&settingChangedCallback, this);
-	g_settings->registerChangedCallback("fullbright",
-		&fullbrightChangedCallback, this);
+	g_settings->registerChangedCallback("discord_rpc_hidden_servers",
+		&settingChangedCallback, this);
+	g_settings->registerChangedCallback("discord_rpc_show_playing",
+		&settingChangedCallback, this);
+	g_settings->registerChangedCallback("discord_rpc_show_nickname",
+		&settingChangedCallback, this);
 
 	readSettings();
 }
@@ -1003,14 +1011,10 @@ void Game::updateDiscordActivity(bool force)
 {
 	bool hidden = false;
 	if (!m_discord_server_key.empty()) {
-		std::string list = g_settings->get("discord_rpc_hidden_servers");
-		if (!list.empty()) {
-			for (const std::string &raw_entry : str_split(list, ',')) {
-				std::string entry(trim(raw_entry));
-				if (!entry.empty() && entry == m_discord_server_key) {
-					hidden = true;
-					break;
-				}
+		for (const std::string &entry : m_cache_discord_hidden_servers) {
+			if (entry == m_discord_server_key) {
+				hidden = true;
+				break;
 			}
 		}
 	}
@@ -1022,10 +1026,10 @@ void Game::updateDiscordActivity(bool force)
 		return;
 	}
 
-	std::string state_text = g_settings->getBool("discord_rpc_show_playing") ?
+	std::string state_text = m_cache_discord_show_playing ?
 			m_discord_playing_text : "";
-	std::string large_text = g_settings->getBool("discord_rpc_show_nickname") ?
-			m_discord_nickname : "MineBoostV2";
+	std::string large_text = m_cache_discord_show_nickname ?
+			m_discord_nickname : "MineBoostV2-GW";
 
 	if (force || m_discord_last_hidden ||
 			state_text != m_discord_last_state_sent ||
@@ -1952,7 +1956,6 @@ void Game::processUserInput(f32 dtime)
 		runData.jump_timer_down += dtime;
 
 	processKeyInput();
-	processMacroWheel(dtime);
 	processItemSelection(&runData.new_playeritem);
 }
 
@@ -2086,59 +2089,11 @@ void Game::processKeyInput()
 	}
 }
 
-// Macro Wheel: hold the wheel key (default Tab, "keymap_macro_wheel") to
-// pop up a ring of saved commands (see MacroList / ".macro add <command>"
-// in chat), scroll to move the selection, release to run whichever one
-// is highlighted -- exactly as if it had been typed in chat. Rendering
-// itself lives in Hud::drawMacroWheel(); this only owns the open/select/
-// run logic and the two Hud fields that drive that rendering.
-void Game::processMacroWheel(f32 dtime)
-{
-	const auto &macros = MacroList::get().getAll();
-
-	if (isKeyDown(KeyType::MACRO_WHEEL) && !macros.empty()) {
-		if (!hud->macro_wheel_open) {
-			hud->macro_wheel_open = true;
-			hud->macro_wheel_selected = 0;
-		}
-
-		// Claim the scroll wheel for macro selection while open (see the
-		// early-out this adds in processItemSelection() so it doesn't
-		// also spin the hotbar). One notch = one step around the wheel.
-		s32 wheel = input->getMouseWheel();
-		if (wheel != 0) {
-			int count = (int)macros.size();
-			hud->macro_wheel_selected =
-				((hud->macro_wheel_selected - (wheel > 0 ? 1 : -1)) % count + count) % count;
-		}
-		return;
-	}
-
-	if (!hud->macro_wheel_open)
-		return;
-
-	// Key was released (or the list emptied out from under us via
-	// ".macro clear" while held) -- run the selection, if any, then
-	// close the wheel either way.
-	hud->macro_wheel_open = false;
-	if (!macros.empty()) {
-		int idx = ((hud->macro_wheel_selected % (int)macros.size()) + (int)macros.size())
-			% (int)macros.size();
-		client->typeChatMessage(utf8_to_wide(macros[idx]));
-	}
-}
-
 void Game::processItemSelection(u16 *new_playeritem)
 {
 	LocalPlayer *player = client->getEnv().getLocalPlayer();
 
 	*new_playeritem = player->getWieldIndex();
-
-	// The Macro Wheel (processMacroWheel(), called just before this)
-	// already claimed this frame's scroll wheel input for picking a
-	// macro -- don't also spin the hotbar selection with it.
-	if (hud->macro_wheel_open)
-		return;
 
 	u16 max_item = player->getMaxHotbarItemcount();
 	if (max_item == 0)
@@ -3657,7 +3612,7 @@ void Game::handlePointingAtNode(const PointedThing &pointed,
 	}
 
 	if ((wasKeyPressed(KeyType::PLACE) ||
-		(runData.repeat_place_timer >= (g_settings->getBool("fast_place") ? g_settings->getFloat("fast_place_value") : m_repeat_place_time))) &&
+		(runData.repeat_place_timer >= m_repeat_place_time)) &&
 		client->checkPrivilege("interact"))  {
 		runData.repeat_place_timer = 0;
 		infostream << "Place button pressed while looking at ground" << std::endl;
@@ -3945,18 +3900,7 @@ void Game::handlePointingAtObject(const PointedThing &pointed,
 			}
 		}
 
-		// NoFriendDamage ("no_friend_damage"): if the punched object is a
-		// player on the .friend list, silently skip the actual damage --
-		// same friend check used above for the aim-lock and for TargetESP
-		// in updateFrame() (see FriendList::isFriend() calls). Only the
-		// damage packet is suppressed; runData.punching/the swing animation
-		// above still plays so it doesn't look broken locally.
-		GenericCAO *punched_gcao = dynamic_cast<GenericCAO*>(runData.selected_object);
-		bool punch_is_protected_friend = g_settings->getBool("no_friend_damage") &&
-			punched_gcao != nullptr && punched_gcao->isPlayer() &&
-			FriendList::get().isFriend(punched_gcao->getName());
-
-		if (do_punch_damage && !punch_is_protected_friend) {
+		if (do_punch_damage) {
 			// Report direct punch
 			v3f objpos = runData.selected_object->getPosition();
 			v3f dir = (objpos - player_position).normalize();
@@ -4441,22 +4385,6 @@ void Game::settingChangedCallback(const std::string &setting_name, void *data)
 	((Game *)data)->readSettings();
 }
 
-void Game::fullbrightChangedCallback(const std::string &setting_name, void *data)
-{
-	((Game *)data)->remeshAllBlocks();
-}
-
-void Game::remeshAllBlocks()
-{
-	if (!client)
-		return;
-
-	std::vector<v3s16> positions;
-	client->getEnv().getClientMap().getAllLoadedBlockPositions(positions);
-	for (const v3s16 &p : positions)
-		client->addUpdateMeshTask(p, false, false);
-}
-
 void Game::readSettings()
 {
 	LogLevel chat_log_level = Logger::stringToLevel(g_settings->get("chat_log_level"));
@@ -4466,6 +4394,20 @@ void Game::readSettings()
 	}
 	m_chat_log_buf.setLogLevel(chat_log_level);
 
+	m_cache_discord_hidden_servers.clear();
+	{
+		std::string list = g_settings->get("discord_rpc_hidden_servers");
+		if (!list.empty()) {
+			for (const std::string &raw_entry : str_split(list, ',')) {
+				std::string entry(trim(raw_entry));
+				if (!entry.empty())
+					m_cache_discord_hidden_servers.push_back(entry);
+			}
+		}
+	}
+	m_cache_discord_show_playing = g_settings->getBool("discord_rpc_show_playing");
+	m_cache_discord_show_nickname = g_settings->getBool("discord_rpc_show_nickname");
+
 	m_cache_disable_escape_sequences     = g_settings->getBool("disable_escape_sequences");
 	m_cache_doubletap_jump               = g_settings->getBool("doubletap_jump");
 	m_cache_enable_clouds                = g_settings->getBool("enable_clouds");
@@ -4474,7 +4416,7 @@ void Game::readSettings()
 	m_cache_enable_fog                   = g_settings->getBool("enable_fog");
 	m_cache_mouse_sensitivity            = g_settings->getFloat("mouse_sensitivity", 0.001f, 10.0f);
 	m_cache_joystick_frustum_sensitivity = std::max(g_settings->getFloat("joystick_frustum_sensitivity"), 0.001f);
-	m_repeat_place_time                  = g_settings->getFloat("repeat_place_time", 0.16f, 2.0f);
+	m_repeat_place_time                  = g_settings->getFloat("repeat_place_time", 0.001f, 2.0f);
 	m_repeat_dig_time                    = g_settings->getFloat("repeat_dig_time", 0.0f, 2.0f);
 
 	m_cache_enable_noclip                = g_settings->getBool("noclip");
@@ -4567,5 +4509,5 @@ void the_game(bool *kill,
 	game.shutdown();
 
 	DiscordRPC::get().setActivity(
-		"In the main menu", "", "mineboostv2_logo", "MineBoostV2", "", "", true);
+		"In the main menu", "", "mineboostv2_logo", "MineBoostV2-GW", "", "", true);
 }

@@ -52,6 +52,20 @@ void TouchControls::loadButtonTexture(IGUIImage *gui_button, const std::string &
 
 void TouchControls::buttonEmitAction(button_info &btn, bool action)
 {
+	// LMB/RMB are simulated as real mouse clicks (same mechanism the
+	// tap-gesture dig/place system already uses -- see
+	// applyContextControls()/emitMouseEvent()) rather than as a simulated
+	// key press, since digging/placing is driven off Irrlicht mouse
+	// events, not the keymap system.
+	if (btn.id == lmb_id) {
+		emitMouseEvent(action ? EMIE_LMOUSE_PRESSED_DOWN : EMIE_LMOUSE_LEFT_UP);
+		return;
+	}
+	if (btn.id == rmb_id) {
+		emitMouseEvent(action ? EMIE_RMOUSE_PRESSED_DOWN : EMIE_RMOUSE_LEFT_UP);
+		return;
+	}
+
 	if (btn.keycode == KEY_UNKNOWN)
 		return;
 
@@ -119,6 +133,14 @@ bool TouchControls::buttonsStep(std::vector<button_info> &buttons, float dtime)
 			continue;
 		has_pointers = true;
 
+		// LMB/RMB should behave like a real held mouse button -- no
+		// periodic release+re-press. For a keyboard-simulated button
+		// that's a harmless no-op blip, but for digging it would
+		// interrupt and restart dig progress roughly 3 times a second
+		// for as long as the button is held.
+		if (btn.id == lmb_id || btn.id == rmb_id)
+			continue;
+
 		btn.repeat_counter += dtime;
 		if (btn.repeat_counter < BUTTON_REPEAT_INTERVAL)
 			continue;
@@ -137,6 +159,15 @@ static EKEY_CODE id_to_keycode(touch_gui_button_id id)
 	// ESC isn't part of the keymap.
 	if (id == exit_id)
 		return KEY_ESCAPE;
+	// LMB/RMB bypass the keymap entirely -- they're handled directly via
+	// TouchControls::emitMouseEvent() in buttonEmitAction(), not a
+	// simulated key press. The exact code returned here is never actually
+	// used as a key; it only needs to be something other than KEY_UNKNOWN
+	// so mayAddButton() doesn't hide the button.
+	if (id == lmb_id)
+		return KEY_LBUTTON;
+	if (id == rmb_id)
+		return KEY_RBUTTON;
 
 	std::string key = "";
 	switch (id) {
@@ -184,6 +215,12 @@ static EKEY_CODE id_to_keycode(touch_gui_button_id id)
 			break;
 		case drop_id:
 			key = "drop";
+			break;
+		case mineboost_menu_id:
+			key = "menu";
+			break;
+		case autoforward_id:
+			key = "autoforward";
 			break;
 		default:
 			break;
@@ -336,6 +373,7 @@ void TouchControls::addButton(std::vector<button_info> &buttons, touch_gui_butto
 	loadButtonTexture(btn_gui_button, image);
 
 	button_info &btn = buttons.emplace_back();
+	btn.id = id;
 	btn.keycode = id_to_keycode(id);
 	btn.gui_button = grab_gui_element<IGUIImage>(btn_gui_button);
 }

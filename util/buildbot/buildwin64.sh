@@ -44,6 +44,8 @@ download "$libhost/llvm/libjpeg-$libjpeg_version-win64.zip"
 download "$libhost/llvm/libpng-$libpng_version-win64.zip"
 download "$libhost/llvm/sdl2-$sdl2_version-win64.zip"
 
+fetch_cppwinrt_headers "$libdir/cppwinrt_pkg"
+
 # Set source dir, downloading Minetest as needed
 get_sources
 
@@ -62,6 +64,7 @@ cmake_args=(
 	-DENABLE_GETTEXT=1
 	-DENABLE_LEVELDB=1
 )
+[ -n "$cppwinrt_include_dir" ] && cmake_args+=(-DMINEBOOST_CPPWINRT_INCLUDE_DIR="$cppwinrt_include_dir")
 add_cmake_libs
 cmake -S $sourcedir -B build "${cmake_args[@]}"
 

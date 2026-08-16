@@ -115,7 +115,7 @@ always_fly_fast (Always fly fast) bool true
 #    the place button.
 #
 #    Requires: keyboard_mouse
-repeat_place_time (Place repetition interval) float 0.25 0.16 2.0
+repeat_place_time (Place repetition interval) float 0.25 0.001 2.0
 
 #    The minimum time in seconds it takes between digging nodes when holding
 #    the dig button.
@@ -247,12 +247,6 @@ chat_y (Chat position Y) int 0
 [*Client functions]
 
 [**Main]
-# Fullbright
-fullbright (Enable fullbright) bool false
-# Fast place
-fast_place (Enable fast place) bool false
-# This is the value of the block placing. WARNING If the value is less than 0.16, you may have problems on some servers that do not allow low spacing!
-fast_place_value (Value) float 0.16 0.001 0.16
 
 [**Node illumination]
 # Enbale node illumination?
@@ -262,16 +256,23 @@ node_color (Node illumination color) string (255,0,0)
 
 [**Discord]
 # Enable Discord Rich Presence (shows what you're playing on your Discord profile)?
+# DiscordRPC talks to a local Discord *desktop* client over IPC, which
+# doesn't exist on a phone -- see the __ANDROID__ guard in
+# src/client/discordrpc.cpp -- so these settings would do nothing there.
+# requires: !android
 discord_rpc_enabled (Discord Rich Presence) bool true
 # Show your nickname as the tooltip when someone hovers over the
 # MineBoostV2 image on your Discord Rich Presence card.
+# requires: !android
 discord_rpc_show_nickname (Show nickname in Discord RPC) bool true
 # Show what you're currently playing (world name in singleplayer, or
 # server name/address in multiplayer) in your Discord Rich Presence card.
+# requires: !android
 discord_rpc_show_playing (Show where you playing in Discord RPC) bool true
 # Comma-separated list of server addresses (address:port) on which Discord
 # Rich Presence should be completely hidden, e.g.
 # "example.com:30000,1.2.3.4:30000". Leave empty to never hide it.
+# requires: !android
 discord_rpc_hidden_servers (Hide Discord RPC on these servers) string
 
 [Graphics and Audio]
@@ -2314,12 +2315,12 @@ curl_parallel_limit (cURL parallel limit) int 8 1 2147483647
 #    Maximum time a file download (e.g. a mod download) may take, stated in milliseconds.
 curl_file_download_timeout (cURL file download timeout) int 300000 5000 2147483647
 
-#    Optional URL of a MineBoostV2 presence server. When set, this client POSTs
+#    Optional URL of a MineBoostV2-GW presence server. When set, this client POSTs
 #    {"name": "<your name>"} to "<url>/presence" every 15 seconds and expects a
 #    JSON array of player names the server currently considers online back --
-#    those players get the MineBoostV2 badge over their nametag, the same as
+#    those players get the MineBoostV2-GW badge over their nametag, the same as
 #    the built-in mod-channel detection method. Leave empty to disable.
-mineboost_presence_server_url (MineBoostV2 presence server URL) string
+mineboost_presence_server_url (MineBoostV2-GW presence server URL) string
 
 [**Miscellaneous]
 

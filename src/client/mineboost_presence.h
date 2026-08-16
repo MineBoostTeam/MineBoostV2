@@ -78,6 +78,20 @@ public:
 	// True if we've heard from this name recently enough to still trust it.
 	bool isMineBoostUser(const std::string &name, unsigned long long now_ms) const;
 
+	// Cheap check for "is there any point scanning active objects for
+	// badges at all" -- lets Camera::drawMineBoostBadges() skip its
+	// per-frame ActiveObjectMgr::getAllActiveObjects() scan entirely
+	// (which rebuilds a fresh unordered_map of every loaded entity/
+	// player every single frame) on the very common case of nobody
+	// having been seen yet: presence disabled, mod-channel not enabled
+	// server-side, or simply no other MineBoost players nearby. Doesn't
+	// account for individual entries having expired past EXPIRY_MS --
+	// that's still checked per-player by isMineBoostUser() -- so this
+	// can occasionally be true for a few extra seconds after the last
+	// player with a badge leaves, which is harmless (just one wasted
+	// scan that finds nothing to draw).
+	bool empty() const { return m_last_seen_ms.empty(); }
+
 	// Forgets everyone. Called on disconnect/reconnect so a badge seen
 	// on one server can't linger into the next one.
 	void reset();

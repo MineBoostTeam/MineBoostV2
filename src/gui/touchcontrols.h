@@ -56,6 +56,7 @@ enum class TapState
 
 struct button_info
 {
+	touch_gui_button_id id = touch_gui_button_id_END;
 	float repeat_counter;
 	EKEY_CODE keycode;
 	std::vector<size_t> pointer_ids;

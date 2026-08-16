@@ -200,12 +200,6 @@ public:
 
 	void drawNametags();
 
-	// Draws name labels over friends (see FriendList), regardless of
-	// whether they are occluded by terrain, so they're always easy to
-	// spot. This only ever shows information about players the user has
-	// explicitly added as a friend via the ".friend add" chat command.
-	void drawFriendESP();
-
 	// MineBoostV2 badge for other players also running it (see
 	// mineboost_presence.h). Deliberately independent of Nametag/
 	// m_nametags -- those get deleted outright by GenericCAO::
@@ -214,8 +208,8 @@ public:
 	// to take the badge down with it since it was drawn as part of the
 	// same per-nametag loop in drawNametags() above. This positions
 	// itself straight off each player's own scene node/selection box
-	// instead, the same way drawFriendESP() does, so it shows up
-	// regardless of whatever a nametag-hiding mod does.
+	// instead, so it shows up regardless of whatever a nametag-hiding
+	// mod does.
 	void drawMineBoostBadges();
 
 	inline void addArmInertia(f32 player_yaw);

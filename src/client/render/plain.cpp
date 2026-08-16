@@ -55,9 +55,7 @@ void DrawHUD::run(PipelineContext &context)
 		context.hud->drawPhotoHud();
 		context.hud->drawDebugTextBackgrounds();
 		context.hud->drawKeyStrokerCpsBackgrounds();
-		context.hud->drawMacroWheel();
 		context.client->getCamera()->drawNametags();
-		context.client->getCamera()->drawFriendESP();
 		context.client->getCamera()->drawMineBoostBadges();
 	}
 	context.device->getGUIEnvironment()->drawAll();

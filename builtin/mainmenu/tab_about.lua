@@ -73,7 +73,7 @@ return {
 		local credits = get_credits()
 
 		table.insert_all(hypertext, {
-			"<heading>", fgettext_ne("MineBoostV2"), "</heading>\n"
+			"<heading>", fgettext_ne("MineBoostV2-GW"), "</heading>\n"
 		})
 		prepare_credits(hypertext, {"Maintainer_ is main developer"})
 		table.insert_all(hypertext, {

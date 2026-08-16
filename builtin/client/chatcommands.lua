@@ -79,19 +79,6 @@ core.register_chatcommand("friend", {
 	end,
 })
 
--- Manage the Macro Wheel (hold the wheel key -- default Tab -- and
--- scroll to pick a command, release to run it). The actual add/del/
--- list/clear logic is handled natively by the client before the chat
--- message ever reaches this callback; this entry exists purely so
--- ".macro" shows up correctly in the ".help" command list/GUI.
-core.register_chatcommand("macro", {
-	params = core.gettext("add <command> | del <number> | list | clear"),
-	description = core.gettext("Manage the Macro Wheel (hold Tab, scroll, release to run)"),
-	func = function(param)
-		return true, core.gettext("Use \".macro add|del|list|clear\" in chat.")
-	end,
-})
-
 function core.run_server_chatcommand(cmd, param)
 	core.send_chat_message("/" .. cmd .. " " .. param)
 end

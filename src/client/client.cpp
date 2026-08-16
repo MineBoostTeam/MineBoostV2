@@ -22,7 +22,6 @@
 #include "client/particles.h"
 #include "client/localplayer.h"
 #include "client/friendlist.h"
-#include "client/macrolist.h"
 #include "client/mineboost_presence.h"
 #include "chatmessage.h"
 #include "util/auth.h"
@@ -382,7 +381,6 @@ void Client::connect(const Address &address, const std::string &address_name,
 
 	m_address_name = address_name;
 	FriendList::get().setServer(address_name + ":" + std::to_string(address.getPort()));
-	MacroList::get().setServer(address_name + ":" + std::to_string(address.getPort()));
 	MineBoostPresence::get().reset();
 	m_mineboost_presence_timer = 1000.0f;
 	m_con.reset(con::createMTP(CONNECTION_TIMEOUT, address.isIPv6(), this));
@@ -1751,24 +1749,24 @@ static bool handleLocalFriendCommand(Client *client, const std::string &message_
 
 	if (sub == "add") {
 		if (arg.empty()) {
-			reply = L"[MineBoostV2] Usage: .friend add <Nickname>";
+			reply = L"[MineBoostV2-GW] Usage: .friend add <Nickname>";
 		} else if (FriendList::get().add(arg)) {
-			reply = L"[MineBoostV2] Added \"" + utf8_to_wide(arg) + L"\" to your friend list.";
+			reply = L"[MineBoostV2-GW] Added \"" + utf8_to_wide(arg) + L"\" to your friend list.";
 		} else {
-			reply = L"[MineBoostV2] \"" + utf8_to_wide(arg) + L"\" is already on your friend list.";
+			reply = L"[MineBoostV2-GW] \"" + utf8_to_wide(arg) + L"\" is already on your friend list.";
 		}
 	} else if (sub == "del" || sub == "remove") {
 		if (arg.empty()) {
-			reply = L"[MineBoostV2] Usage: .friend del <Nickname>";
+			reply = L"[MineBoostV2-GW] Usage: .friend del <Nickname>";
 		} else if (FriendList::get().remove(arg)) {
-			reply = L"[MineBoostV2] Removed \"" + utf8_to_wide(arg) + L"\" from your friend list.";
+			reply = L"[MineBoostV2-GW] Removed \"" + utf8_to_wide(arg) + L"\" from your friend list.";
 		} else {
-			reply = L"[MineBoostV2] \"" + utf8_to_wide(arg) + L"\" was not on your friend list.";
+			reply = L"[MineBoostV2-GW] \"" + utf8_to_wide(arg) + L"\" was not on your friend list.";
 		}
 	} else if (sub == "list") {
 		const auto &friends = FriendList::get().getAll();
 		if (friends.empty()) {
-			reply = L"[MineBoostV2] Your friend list is empty.";
+			reply = L"[MineBoostV2-GW] Your friend list is empty.";
 		} else {
 			std::wstring names;
 			for (const auto &name : friends) {
@@ -1776,89 +1774,10 @@ static bool handleLocalFriendCommand(Client *client, const std::string &message_
 					names += L", ";
 				names += utf8_to_wide(name);
 			}
-			reply = L"[MineBoostV2] Friends: " + names;
+			reply = L"[MineBoostV2-GW] Friends: " + names;
 		}
 	} else {
-		reply = L"[MineBoostV2] Unknown sub-command. Use: .friend add|del|list <Nickname>";
-	}
-
-	client->pushToChatQueue(new ChatMessage(CHATMESSAGE_TYPE_SYSTEM, reply));
-	return true;
-}
-
-// Handles the local-only ".macro" family of commands used by the Macro
-// Wheel (hold the wheel key -- default Tab -- and scroll to pick one).
-// Returns true if the message was a macro command (whether it succeeded
-// or not) and should therefore NOT be sent to the server.
-static bool handleLocalMacroCommand(Client *client, const std::string &message_utf8)
-{
-	static const std::string prefix = ".macro";
-	if (message_utf8.compare(0, prefix.size(), prefix) != 0)
-		return false;
-
-	// Must be either exactly ".macro" or followed by a space, same
-	// guard as handleLocalFriendCommand() above (so e.g. a hypothetical
-	// ".macroblah" wouldn't be mistaken for this).
-	if (message_utf8.size() > prefix.size() && message_utf8[prefix.size()] != ' ')
-		return false;
-
-	std::string rest = trim(message_utf8.substr(prefix.size()));
-
-	std::string sub, arg;
-	std::string::size_type sp = rest.find(' ');
-	if (sp == std::string::npos) {
-		sub = rest;
-	} else {
-		sub = rest.substr(0, sp);
-		arg = trim(rest.substr(sp + 1));
-	}
-	sub = lowercase(sub);
-
-	std::wstring reply;
-
-	if (sub == "add") {
-		if (arg.empty()) {
-			reply = L"[MineBoostV2] Usage: .macro add <command>  (e.g. a server command "
-				L"like /command, or any other chat message)";
-		} else if (MacroList::get().add(arg)) {
-			reply = L"[MineBoostV2] Added \"" + utf8_to_wide(arg) + L"\" to the Macro Wheel.";
-		} else {
-			reply = L"[MineBoostV2] Nothing to add.";
-		}
-	} else if (sub == "del" || sub == "remove") {
-		bool ok = false;
-		size_t idx = 0;
-		if (!arg.empty()) {
-			try {
-				idx = std::stoul(arg);
-				ok = true;
-			} catch (...) {
-				ok = false;
-			}
-		}
-		if (!ok) {
-			reply = L"[MineBoostV2] Usage: .macro del <number>  (see .macro list for numbers)";
-		} else if (MacroList::get().removeIndex(idx)) {
-			reply = L"[MineBoostV2] Removed macro #" + utf8_to_wide(arg) + L".";
-		} else {
-			reply = L"[MineBoostV2] No macro #" + utf8_to_wide(arg) + L".";
-		}
-	} else if (sub == "list") {
-		const auto &macros = MacroList::get().getAll();
-		if (macros.empty()) {
-			reply = L"[MineBoostV2] Your Macro Wheel is empty. Add one with: .macro add <command>";
-		} else {
-			reply = L"[MineBoostV2] Macro Wheel:";
-			for (size_t i = 0; i < macros.size(); i++) {
-				reply += L"\n  " + utf8_to_wide(std::to_string(i + 1)) + L". " +
-					utf8_to_wide(macros[i]);
-			}
-		}
-	} else if (sub == "clear") {
-		MacroList::get().clear();
-		reply = L"[MineBoostV2] Macro Wheel cleared.";
-	} else {
-		reply = L"[MineBoostV2] Unknown sub-command. Use: .macro add|del|list|clear";
+		reply = L"[MineBoostV2-GW] Unknown sub-command. Use: .friend add|del|list <Nickname>";
 	}
 
 	client->pushToChatQueue(new ChatMessage(CHATMESSAGE_TYPE_SYSTEM, reply));
@@ -1876,10 +1795,6 @@ void Client::typeChatMessage(const std::wstring &message)
 
 	// Local client-side friend list commands never reach the server.
 	if (handleLocalFriendCommand(this, message_utf8))
-		return;
-
-	// Same for Macro Wheel management commands.
-	if (handleLocalMacroCommand(this, message_utf8))
 		return;
 
 	// If message was consumed by script API, don't send it to server

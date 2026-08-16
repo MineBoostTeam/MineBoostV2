@@ -78,6 +78,49 @@ _dlls () {
 	done
 }
 
+# Best-effort fetch of the C++/WinRT projection headers (winrt/base.h,
+# winrt/Windows.Media.Control.h, etc.) needed for NowPlaying's Windows
+# System Media Transport Controls backend (see HAVE_WINRT_SMTC in
+# src/CMakeLists.txt and the big comment atop src/client/nowplaying.h).
+#
+# On MSYS2 these come from the mingw-w64-clang-x86_64-cppwinrt pacman
+# package, but our Windows CI cross-compiles from Linux with llvm-mingw
+# instead (see download_toolchain.sh), which has no such package. The
+# headers themselves are just generated C++ -- Microsoft ships them
+# pre-generated in the "Microsoft.Windows.CppWinRT" NuGet package, so
+# grab that and point CMake at its include dir.
+#
+# Deliberately non-fatal: on any failure (network, layout change on
+# Microsoft's end, etc.) this just leaves $cppwinrt_include_dir unset
+# and the rest of the build proceeds exactly as it did before -- CMake
+# already handles a missing winrt/Windows.Media.Control.h gracefully by
+# falling back to NowPlaying's window-title-scraping path (see
+# nowplaying.h), it just won't get album art/playback position.
+fetch_cppwinrt_headers () {
+	local dest=$1
+	cppwinrt_include_dir=
+	local nupkg="$dest/cppwinrt.nupkg"
+	mkdir -p "$dest"
+	echo "Fetching C++/WinRT headers for NowPlaying's SMTC backend..."
+	if ! wget -q "https://www.nuget.org/api/v2/package/Microsoft.Windows.CppWinRT" -O "$nupkg"; then
+		echo "cppwinrt: download failed; NowPlaying will fall back to window-title scraping on Windows" >&2
+		return 0
+	fi
+	# A .nupkg is just a zip; the projection headers live under
+	# build/native/include inside it.
+	if ! unzip -q -o "$nupkg" -d "$dest/cppwinrt" "build/native/include/*"; then
+		echo "cppwinrt: could not extract package; NowPlaying will fall back to window-title scraping on Windows" >&2
+		return 0
+	fi
+	local inc="$dest/cppwinrt/build/native/include"
+	if [ ! -f "$inc/winrt/base.h" ]; then
+		echo "cppwinrt: package layout wasn't what was expected; NowPlaying will fall back to window-title scraping on Windows" >&2
+		return 0
+	fi
+	echo "cppwinrt headers ready at $inc"
+	cppwinrt_include_dir=$inc
+}
+
 add_cmake_libs () {
 	cmake_args+=(
 		-DPNG_LIBRARY=$libdir/libpng/lib/libpng16.dll.a

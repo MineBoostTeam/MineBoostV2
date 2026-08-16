@@ -64,13 +64,6 @@ public:
 	u16 target_hud_hp = 0;
 	u16 target_hud_hp_max = 20;
 
-	// Macro Wheel: radial menu shown while the wheel key (default Tab)
-	// is held. Game::processMacroWheel() (src/client/game.cpp) owns the
-	// open/select logic and just writes these two; drawMacroWheel()
-	// below only reads them (plus MacroList) to render.
-	bool macro_wheel_open = false;
-	int macro_wheel_selected = 0;
-
 	Hud(Client *client, LocalPlayer *player,
 			Inventory *inventory);
 	void readScalingSetting();
@@ -89,7 +82,6 @@ public:
 	void drawPhotoHud();
 	void drawDebugTextBackgrounds();
 	void drawKeyStrokerCpsBackgrounds();
-	void drawMacroWheel();
 	void drawInventoryHud();
 	void drawCraftHud();
 	// void drawArmorHud(); // ArmorHUD temporarily disabled

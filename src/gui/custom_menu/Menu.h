@@ -150,6 +150,7 @@ public:
     void updateHitParticleScrollBarPosition(gui::IGUIScrollBar* scrollbar, int screenW, int screenH);
     void updateTargetParticleScrollBarPosition(gui::IGUIScrollBar* scrollbar, int screenW, int screenH);
     void updateHudSizeScrollBarPosition(gui::IGUIScrollBar* scrollbar, int screenW, int screenH);
+    void updatePlaceCooldownScrollBarPosition(gui::IGUIScrollBar* scrollbar, int screenW, int screenH);
 
     std::vector<Setting> getSettings() {
         std::vector<Setting> settings;
@@ -164,7 +165,6 @@ public:
         settings.push_back({"CraftHUD", "craft_hud", SettingCategory::GUI});
         // settings.push_back({"ArmorHUD", "armor_hud", SettingCategory::GUI}); // ArmorHUD temporarily disabled
 
-        settings.push_back({"Fullbright", "fullbright", SettingCategory::RENDER});
         settings.push_back({"Water Effect", "small_post_effect_color", SettingCategory::RENDER});
         settings.push_back({"Node \n illumination", "node_illumination", SettingCategory::RENDER});
         settings.push_back({"Display sunrise", "display_sunrise", SettingCategory::RENDER});
@@ -173,8 +173,6 @@ public:
         settings.push_back({"Sky color","use_custom_sky_color", SettingCategory::RENDER});
         settings.push_back({"Particles", "particles", SettingCategory::RENDER});
 
-        settings.push_back({"Fast place", "fast_place", SettingCategory::MISC, {Types::Boolean, 43, 124, "data"}});
-        settings.push_back({"NoFriend \n Damage", "no_friend_damage", SettingCategory::MISC});
         settings.push_back({"TargetHUD", "target_hud", SettingCategory::GUI});
         settings.push_back({"TargedESP", "target_highlight_particles", SettingCategory::RENDER});
         settings.push_back({"PhotoHUD", "photo_hud", SettingCategory::GUI});
@@ -228,6 +226,11 @@ private:
     IGUIScrollBar* hitparticle_scrollbar;
     IGUIScrollBar* target_particle_scrollbar;
     IGUIScrollBar* hud_size_scrollbar;
+    // Place-repeat cooldown ("repeat_place_time", 0.001-2.0s, see
+    // fast_place removal) -- stored on the slider as whole milliseconds
+    // (1-2000) since IGUIScrollBar only deals in integer positions, then
+    // divided by 1000 when written back to the float setting in draw().
+    IGUIScrollBar* place_cooldown_scrollbar;
     gui::IGUIFont* font = g_fontengine->getFont(FONT_SIZE_UNSPECIFIED, FM_Standard);
 
     int scrollbarTop;
@@ -235,6 +238,17 @@ private:
     int hitparticleScrollbarTop;
     int targetParticleScrollbarTop;
     int hudSizeScrollbarTop;
+    int placeCooldownScrollbarTop;
+    // Last value actually written to "repeat_place_time" -- see draw(),
+    // where this guards the write. "repeat_place_time" has a
+    // registered Game::settingChangedCallback (so the live cooldown
+    // actually updates while dragging), and g_settings->set() fires
+    // that callback unconditionally on every call regardless of
+    // whether the value changed -- so without this guard, having the
+    // MineBoost menu open at all (any tab but Colors) meant a full
+    // Game::readSettings() re-parse every single frame, forever, not
+    // just while actually dragging the slider.
+    s32 placeCooldownLastWrittenMs = -1;
 
     // Per-function keybinds (up to 2 per setting -- see "bind_<setting>"
     // in g_settings, e.g. "bind_fullbright" = "KEY_F6,WHEEL_UP"). Middle-

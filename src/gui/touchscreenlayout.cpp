@@ -24,6 +24,10 @@ const char *button_names[] = {
 	"inventory",
 	"drop",
 	"exit",
+	"mineboost_menu",
+	"lmb",
+	"rmb",
+	"autoforward",
 
 	"fly",
 	"fast",
@@ -51,6 +55,10 @@ const char *button_titles[] = {
 	N_("Inventory"),
 	N_("Drop"),
 	N_("Exit"),
+	N_("MineBoost menu"),
+	N_("LMB"),
+	N_("RMB"),
+	N_("Auto walk"),
 
 	N_("Toggle fly"),
 	N_("Toggle fast"),
@@ -77,6 +85,10 @@ const char *button_image_names[] = {
 	"inventory_btn.png",
 	"drop_btn.png",
 	"exit_btn.png",
+	"mineboost_menu_btn.png",
+	"lmb_btn.png",
+	"rmb_btn.png",
+	"autoforward_btn.png",
 
 	"fly_btn.png",
 	"fast_btn.png",

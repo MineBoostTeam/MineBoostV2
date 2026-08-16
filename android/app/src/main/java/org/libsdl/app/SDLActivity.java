@@ -59,9 +59,14 @@ import java.util.Locale;
 */
 public class SDLActivity extends Activity implements View.OnSystemUiVisibilityChangeListener {
     private static final String TAG = "SDL";
+    // Must track whatever SDL2 version the precompiled native deps
+    // (android/native/build.gradle -> minetest_android_deps "latest"
+    // release) actually bundle -- this is checked at runtime in
+    // init() below against nativeGetVersion() and startup fails with
+    // "SDL C/Java version mismatch" if it doesn't match exactly.
     private static final int SDL_MAJOR_VERSION = 2;
-    private static final int SDL_MINOR_VERSION = 30;
-    private static final int SDL_MICRO_VERSION = 8;
+    private static final int SDL_MINOR_VERSION = 32;
+    private static final int SDL_MICRO_VERSION = 10;
 /*
     // Display InputType.SOURCE/CLASS of events and devices
     //

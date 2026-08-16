@@ -357,9 +357,16 @@ void GameFormSpec::showPauseMenu()
 		<< strgettext("Exit to Menu") << "]";
 	os		<< "button_exit[4," << (ypos++) << ";3,0.5;btn_exit_os;"
 		<< strgettext("Exit to OS")   << "]";
+#ifndef __ANDROID__
+	// DiscordRPC::init() is itself a no-op on Android (see
+	// discordrpc.cpp -- there's no local Discord desktop client for it
+	// to talk to over IPC on a phone), so showing a checkbox for it here
+	// would just be a dead control that looks like it should do
+	// something but never will.
 	os		<< "checkbox[4," << (ypos++) << ";discord_rpc;"
 		<< strgettext("Discord Rich Presence") << ";"
 		<< (g_settings->getBool("discord_rpc_enabled") ? "true" : "false") << "]";
+#endif
 	if (!control_text.empty()) {
 	os		<< "textarea[7.5,0.25;3.9,6.25;;" << control_text << ";]";
 	}

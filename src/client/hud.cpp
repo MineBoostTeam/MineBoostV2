@@ -34,7 +34,6 @@
 #include "client/minimap.h"
 #include "client/texturesource.h"
 #include "gui/touchcontrols.h"
-#include "client/macrolist.h"
 #include "util/enriched_string.h"
 #include "irrlicht_changes/CGUITTFont.h"
 #include "IFileSystem.h"
@@ -1391,76 +1390,6 @@ void Hud::drawKeyStrokerCpsBackgrounds()
 		core::rect<s32> box(x, y, x + w, y + h);
 		drawHudColorPanel(driver, box, "hud_color_cps_border");
 	}
-}
-
-// Radial menu shown while the Macro Wheel key (default Tab) is held --
-// see Game::processMacroWheel() in src/client/game.cpp, which owns
-// macro_wheel_open/macro_wheel_selected and the actual key/scroll
-// handling; this function only reads them (plus MacroList) to render.
-// Irrlicht's 2D API has no filled-polygon primitive, so rather than true
-// pie wedges this draws the commands as a ring of boxes around the
-// center -- the same "arrange N choices in a circle" idea, just built
-// out of the same draw2DRectangle() calls every other MineBoost HUD
-// already uses.
-void Hud::drawMacroWheel()
-{
-	if (!macro_wheel_open)
-		return;
-
-	const auto &macros = MacroList::get().getAll();
-	if (macros.empty())
-		return;
-
-	float hud_size = rangelim(g_settings->getFloat("hud_size"), 0.5f, 2.5f);
-	unsigned int scaled_font_size = (unsigned int)(g_fontengine->getDefaultFontSize() * hud_size);
-	gui::IGUIFont *font = g_fontengine->getFont(scaled_font_size);
-	if (!font)
-		return;
-
-	s32 cx = (s32)m_screensize.X / 2;
-	s32 cy = (s32)m_screensize.Y / 2;
-
-	// Dim the world behind the wheel so the selection reads clearly.
-	driver->draw2DRectangle(video::SColor(90, 0, 0, 0),
-		core::rect<s32>(0, 0, (s32)m_screensize.X, (s32)m_screensize.Y));
-
-	s32 radius = (s32)(180 * hud_size);
-	s32 box_w = (s32)(170 * hud_size);
-	s32 box_h = (s32)(36 * hud_size);
-	int selected = ((macro_wheel_selected % (int)macros.size()) + (int)macros.size())
-		% (int)macros.size();
-
-	for (size_t i = 0; i < macros.size(); i++) {
-		float angle = (-90.0f + i * (360.0f / macros.size())) * M_PI / 180.0f;
-		s32 ix = cx + (s32)(radius * std::cos(angle));
-		s32 iy = cy + (s32)(radius * std::sin(angle));
-
-		core::rect<s32> box(ix - box_w / 2, iy - box_h / 2, ix + box_w / 2, iy + box_h / 2);
-		bool is_selected = ((int)i == selected);
-
-		ModernUI::panel(driver, box, ModernUI::RadiusSmall,
-			is_selected ? video::SColor(220, 30, 40, 55) : video::SColor(190, 24, 26, 34),
-			is_selected ? ModernUI::PanelBorder : ModernUI::PanelBorderDim,
-			/*shadow=*/false);
-
-		if (is_selected)
-			driver->draw2DLine(core::position2d<s32>(cx, cy),
-				core::position2d<s32>(ix, iy), video::SColor(140, 120, 255, 120));
-
-		std::wstring label = utf8_to_wide(macros[i]);
-		// Truncate long commands so they don't spill out of the box --
-		// full text is still visible via ".macro list" in chat.
-		const size_t max_chars = 22;
-		if (label.size() > max_chars)
-			label = label.substr(0, max_chars - 1) + L"\u2026";
-
-		font->draw(label.c_str(), box, video::SColor(255, 255, 255, 255), true, true);
-	}
-
-	// Small center dot so the ring has a clear focal point.
-	s32 dot = (s32)(4 * hud_size);
-	driver->draw2DRectangle(video::SColor(220, 255, 255, 255),
-		core::rect<s32>(cx - dot, cy - dot, cx + dot, cy + dot));
 }
 
 void Hud::drawTargetHud()

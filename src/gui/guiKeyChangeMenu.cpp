@@ -74,7 +74,6 @@ enum
 	GUI_ID_KEY_SLOT9_BUTTON,
 	GUI_ID_KEY_DIG_BUTTON,
 	GUI_ID_KEY_PLACE_BUTTON,
-	GUI_ID_KEY_MACRO_WHEEL_BUTTON,
 	// other
 	GUI_ID_CB_AUX1_DESCENDS,
 	GUI_ID_CB_DOUBLETAP_JUMP,
@@ -486,8 +485,4 @@ void GUIKeyChangeMenu::init_keys()
 	// EMIE_XBUTTON1/2_* cases in src/client/inputhandler.cpp).
 	this->add_key(GUI_ID_KEY_DIG_BUTTON,          wstrgettext("Dig/punch/use"),    "keymap_dig");
 	this->add_key(GUI_ID_KEY_PLACE_BUTTON,        wstrgettext("Place/use"),        "keymap_place");
-	// Hold to open the Macro Wheel, scroll to pick a saved command,
-	// release to run it. Commands are added via ".macro add <command>"
-	// in chat -- see MacroList / Hud::drawMacroWheel().
-	this->add_key(GUI_ID_KEY_MACRO_WHEEL_BUTTON,  wstrgettext("Macro Wheel"),      "keymap_macro_wheel");
 }

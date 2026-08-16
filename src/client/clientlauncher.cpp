@@ -157,7 +157,7 @@ bool ClientLauncher::run(GameStartData &start_data, const Settings &cmd_args)
 	static const std::string DISCORD_CLIENT_ID = "1469076486806831309";
 	DiscordRPC::get().init(DISCORD_CLIENT_ID);
 	DiscordRPC::get().setActivity(
-		"In the main menu", "", "mineboostv2_logo", "MineBoostV2", "", "", true);
+		"In the main menu", "", "mineboostv2_logo", "MineBoostV2-GW", "", "", true);
 
 	/*
 		Menu-game loop
