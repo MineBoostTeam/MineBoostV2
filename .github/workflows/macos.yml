@@ -3,32 +3,7 @@ name: macos
 # build on c/cpp changes or workflow changes
 on:
   push:
-    paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - 'irr/**.mm' # Objective-C(++)
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'po/**.po'
-      - '.github/workflows/macos.yml'
   pull_request:
-    paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - 'irr/**.mm' # Objective-C(++)
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'po/**.po'
-      - '.github/workflows/macos.yml'
-
 jobs:
   build-intel-macos:
     # use lowest possible macOS running on x86_64 supported by brew to support more users

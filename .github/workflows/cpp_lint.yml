@@ -3,30 +3,7 @@ name: cpp_lint
 # lint on c/cpp changes or workflow changes
 on:
   push:
-    paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'util/ci/**'
-      - '.github/workflows/**.yml'
   pull_request:
-    paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'util/ci/**'
-      - '.github/workflows/**.yml'
-
 env:
   CLANG_TIDY: clang-tidy-15
 

@@ -3,32 +3,7 @@ name: linux
 # build on c/cpp changes or workflow changes
 on:
   push:
-    paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'po/**.po'
-      - 'util/ci/**'
-      - '.github/workflows/linux.yml'
   pull_request:
-    paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'po/**.po'
-      - 'util/ci/**'
-      - '.github/workflows/linux.yml'
-
 env:
   MINETEST_POSTGRESQL_CONNECT_STRING: 'host=localhost user=minetest password=minetest dbname=minetest'
 

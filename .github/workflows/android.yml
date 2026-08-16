@@ -3,32 +3,7 @@ name: android
 # build on c/cpp changes or workflow changes
 on:
   push:
-    paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'po/**.po'
-      - 'android/**'
-      - '.github/workflows/android.yml'
   pull_request:
-    paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'po/**.po'
-      - 'android/**'
-      - '.github/workflows/android.yml'
-
 jobs:
   build:
     runs-on: ubuntu-22.04

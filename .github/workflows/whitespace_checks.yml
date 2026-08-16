@@ -5,26 +5,7 @@ name: whitespace_checks
 # (luacheck already checks .lua files)
 on:
   push:
-    paths:
-      - '**.txt'
-      - '**.md'
-      - '**.[ch]'
-      - '**.cpp'
-      - '**.hpp'
-      - '**.sh'
-      - '**.cmake'
-      - '**.glsl'
   pull_request:
-    paths:
-      - '**.txt'
-      - '**.md'
-      - '**.[ch]'
-      - '**.cpp'
-      - '**.hpp'
-      - '**.sh'
-      - '**.cmake'
-      - '**.glsl'
-
 jobs:
   trailing_whitespaces:
     runs-on: ubuntu-latest
