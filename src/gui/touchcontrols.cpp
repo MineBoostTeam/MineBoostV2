@@ -251,6 +251,7 @@ TouchControls::TouchControls(IrrlichtDevice *device, ISimpleTextureSource *tsrc)
 
 	m_screensize = m_device->getVideoDriver()->getScreenSize();
 	m_button_size = ButtonLayout::getButtonSize(m_screensize);
+	m_last_punch_gesture = g_settings->get("touch_punch_gesture");
 	applyLayout(ButtonLayout::loadFromSettings());
 }
 
@@ -650,10 +651,13 @@ void TouchControls::step(float dtime)
 {
 	v2u32 screensize = m_device->getVideoDriver()->getScreenSize();
 	s32 button_size = ButtonLayout::getButtonSize(screensize);
+	std::string punch_gesture = g_settings->get("touch_punch_gesture");
 
-	if (m_screensize != screensize || m_button_size != button_size) {
+	if (m_screensize != screensize || m_button_size != button_size ||
+			m_last_punch_gesture != punch_gesture) {
 		m_screensize = screensize;
 		m_button_size = button_size;
+		m_last_punch_gesture = punch_gesture;
 		applyLayout(m_layout);
 	}
 

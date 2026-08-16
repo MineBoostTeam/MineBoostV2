@@ -131,6 +131,11 @@ public:
     void close();
 
     void initCategoryButtons();
+    // Repositions the already-created category tab buttons (GUI/Render/
+    // Movement/Scrollbars) to match the current screenW/screenH, without
+    // touching the `buttons` vector itself -- unlike initCategoryButtons(),
+    // safe to call every time the menu opens (see create()).
+    void repositionCategoryButtons();
 
     void ItemsInit(SettingCategory category);
 

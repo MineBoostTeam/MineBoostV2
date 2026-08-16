@@ -7,6 +7,7 @@
 #include "client/texturesource.h"
 #include "convert_json.h"
 #include "gettext.h"
+#include "log.h"
 #include "settings.h"
 #include <json/json.h>
 
@@ -135,8 +136,18 @@ void ButtonMeta::setPos(v2s32 pos, v2u32 screensize, s32 button_size)
 
 bool ButtonLayout::isButtonAllowed(touch_gui_button_id id)
 {
-	return id != joystick_off_id && id != joystick_bg_id && id != joystick_center_id &&
-			id != touch_gui_button_id_END;
+	if (id == joystick_off_id || id == joystick_bg_id || id == joystick_center_id ||
+			id == touch_gui_button_id_END)
+		return false;
+	// "Hit variant 3": lmb_id/rmb_id are a dedicated, self-contained
+	// control scheme selected via "touch_punch_gesture" == "buttons"
+	// (see the guard in src/client/game.cpp around applyContextControls()),
+	// not generic optional buttons -- so they shouldn't be offered in the
+	// layout editor's "+" add-button list, or end up sitting in the
+	// overflow menu, while a different hit variant (tap/hold) is active.
+	if ((id == lmb_id || id == rmb_id) && g_settings->get("touch_punch_gesture") != "buttons")
+		return false;
+	return true;
 }
 
 bool ButtonLayout::isButtonRequired(touch_gui_button_id id)
@@ -171,6 +182,18 @@ const ButtonLayout ButtonLayout::predefined {{
 	{overflow_id, {
 		v2f(1.0f, 1.0f),
 		v2f(-0.75f, -5.0f),
+	}},
+	// Second column, left of zoom/aux1/overflow -- only actually shown
+	// when "touch_punch_gesture" is "buttons" (see mayAddButton() in
+	// touchcontrols.cpp); can still be dragged elsewhere via the layout
+	// editor like any other predefined position.
+	{lmb_id, {
+		v2f(1.0f, 1.0f),
+		v2f(-2.5f, -2.0f),
+	}},
+	{rmb_id, {
+		v2f(1.0f, 1.0f),
+		v2f(-2.5f, -3.5f),
 	}},
 }};
 
@@ -208,6 +231,20 @@ video::ITexture *ButtonLayout::getTexture(touch_gui_button_id btn, ISimpleTextur
 		// necessary in the mainmenu
 		tex = tsrc->getTexture(porting::path_share + "/textures/base/pack/" +
 				button_image_names[btn]);
+	if (!tex) {
+		// Missing/renamed texture file -- fall back to the overflow
+		// icon rather than returning null. A crash here (a previous
+		// null dereference two lines below in getRect()) took down
+		// the whole layout editor the moment it needed the size of
+		// whichever button was missing its file, which is exactly
+		// the situation "isButtonRequired" buttons like overflow_id
+		// hit unconditionally every time the editor opens.
+		warningstream << "ButtonLayout::getTexture(): missing texture \""
+				<< button_image_names[btn] << "\" for button id " << (int)btn
+				<< ", falling back to a placeholder" << std::endl;
+		tex = tsrc->getTexture(porting::path_share + "/textures/base/pack/" +
+				button_image_names[overflow_id]);
+	}
 	irr_ptr<video::ITexture> ptr;
 	ptr.grab(tex);
 	texture_cache[btn] = ptr;

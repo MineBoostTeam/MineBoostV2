@@ -35,13 +35,17 @@ enum touch_gui_button_id : u8
 	exit_id,
 	mineboost_menu_id,
 
-	// Dedicated LMB/RMB buttons -- an alternative to the tap-gesture dig/
-	// place system (see TouchControls::applyContextControls()). Held down
-	// like a real mouse button instead of relying on short-tap/long-tap
-	// timing; bypasses the keymap system entirely and goes straight to
-	// TouchControls::emitMouseEvent() (see buttonEmitAction() special
-	// case). Off-layout by default -- opt in via the overflow menu/editor,
-	// same as chat_id etc above.
+	// Dedicated LMB/RMB buttons -- hit variant 3, an alternative to the
+	// tap-gesture dig/place system (variants 1/2, see
+	// TouchControls::applyContextControls() and its guard in
+	// src/client/game.cpp). Held down like a real mouse button instead of
+	// relying on short-tap/long-tap timing; bypasses the keymap system
+	// entirely and goes straight to TouchControls::emitMouseEvent() (see
+	// buttonEmitAction() special case). Only shown at all -- not even via
+	// the overflow menu/editor -- while "touch_punch_gesture" is set to
+	// "buttons" (see ButtonLayout::isButtonAllowed()); this is a
+	// dedicated control scheme selected by that setting, not a generic
+	// optional button like chat_id etc above.
 	lmb_id,
 	rmb_id,
 

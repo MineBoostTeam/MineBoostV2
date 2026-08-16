@@ -3230,8 +3230,17 @@ void Game::processPlayerInteraction(f32 dtime, bool show_hud)
 		infostream << "Pointing at " << pointed.dump() << std::endl;
 
 	if (g_touchcontrols) {
-		auto mode = selected_def.touch_interaction.getMode(selected_def, pointed.type);
-		g_touchcontrols->applyContextControls(mode);
+		// Hit variant 3 ("touch_punch_gesture" == "buttons"): dig/place
+		// are driven entirely by the dedicated lmb_id/rmb_id buttons
+		// (see TouchControls::buttonEmitAction()), which already call
+		// emitMouseEvent() directly -- same as a real LMB/RMB click.
+		// Skipping applyContextControls() here just means the tap/hold
+		// gesture on the move area no longer *also* triggers digging in
+		// this mode, so it's purely for aiming.
+		if (g_settings->get("touch_punch_gesture") != "buttons") {
+			auto mode = selected_def.touch_interaction.getMode(selected_def, pointed.type);
+			g_touchcontrols->applyContextControls(mode);
+		}
 		// applyContextControls may change dig/place input.
 		// Update again so that TOSERVER_INTERACT packets have the correct controls set.
 		player->control.dig = isKeyDown(KeyType::DIG);

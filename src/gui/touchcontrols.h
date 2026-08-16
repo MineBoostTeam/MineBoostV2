@@ -131,6 +131,11 @@ private:
 	ISimpleTextureSource *m_texturesource = nullptr;
 	v2u32 m_screensize;
 	s32 m_button_size;
+	// Cached so step() can detect a live change of "touch_punch_gesture"
+	// (e.g. switching to/from hit variant 3, "buttons") and re-run
+	// applyLayout() to show/hide the lmb_id/rmb_id buttons immediately,
+	// same as it already does for screensize/button_size changes.
+	std::string m_last_punch_gesture;
 	double m_touchscreen_threshold;
 	u16 m_long_tap_delay;
 	bool m_visible = true;

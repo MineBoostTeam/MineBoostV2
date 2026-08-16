@@ -203,8 +203,15 @@ virtual_joystick_triggers_aux1 (Virtual joystick triggers Aux1 button) bool fals
 #      Known from the classic Luanti mobile controls.
 #      Combat is more or less impossible.
 #
+#    * buttons
+#      MineBoost hit variant 3: dedicated on-screen LMB/RMB buttons
+#      instead of a tap/hold gesture. Digging/punching and placing/using
+#      are driven directly by those buttons (see lmb_id/rmb_id in
+#      src/gui/touchscreenlayout.h); the move area is then only used for
+#      aiming, not for hitting.
+#
 #    Requires: touchscreen
-touch_punch_gesture (Punch gesture) enum short_tap short_tap,long_tap
+touch_punch_gesture (Punch gesture) enum short_tap short_tap,long_tap,buttons
 
 [MineBoost]
 

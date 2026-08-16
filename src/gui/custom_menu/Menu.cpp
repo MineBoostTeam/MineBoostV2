@@ -1285,8 +1285,40 @@ void Menu::initCategoryButtons()
     updateCategoryButtonActiveStates();
 }
 
+void Menu::repositionCategoryButtons()
+{
+    s32 x = (screenW - WIDTH_) / 2;
+    s32 y = (screenH - HEIGHT_) / 2;
+
+    // Same geometry as initCategoryButtons(), in the same push order --
+    // just overwriting the existing Button structs' rects in place
+    // (Button::addButton() is a plain field assignment, not GUI-element
+    // creation, so this is safe to call repeatedly).
+    static const wchar_t *titles[4] = {L"GUI", L"Render", L"Movement", L"Scrollbars"};
+    for (size_t i = 0; i < buttons.size() && i < 4; i++) {
+        buttons[i].addButton(core::rect<s32>(x + 15, y + 15 + (s32)i * 45,
+            x + 15 + 160, y + 15 + 30 + (s32)i * 45), titles[i]);
+    }
+}
+
 void Menu::create()
 {
+    // Refresh the cached screen size and reflow every category button +
+    // settings tile to match it every time the menu is (re)opened, not
+    // just once at construction. On some phones the real screen/surface
+    // size isn't final yet at Menu construction time (Game::initGui()
+    // runs before the Android surface is guaranteed to be at its final
+    // size), or it changes later (rotation) -- with only the stale
+    // construction-time screenW/screenH, every tile and category button
+    // ends up positioned off of outdated coordinates, which looks like
+    // both "text doesn't show" (drawn off-screen/clipped) and "clicks
+    // don't register" (hit-testing against those same stale rects) at
+    // once, without the menu itself being visibly broken otherwise.
+    screenW = env->getVideoDriver()->getScreenSize().Width;
+    screenH = env->getVideoDriver()->getScreenSize().Height;
+    repositionCategoryButtons();
+    ItemsInit(current_category);
+
     core::rect<s32> screenRect(0, 0,
         env->getVideoDriver()->getScreenSize().Width,
         env->getVideoDriver()->getScreenSize().Height);
