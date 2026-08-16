@@ -3,32 +3,7 @@ name: linux
 # build on c/cpp changes or workflow changes
 on:
   push:
-    paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'po/**.po'
-      - 'util/ci/**'
-      - '.github/workflows/linux.yml'
   pull_request:
-    paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'po/**.po'
-      - 'util/ci/**'
-      - '.github/workflows/linux.yml'
-
 env:
   MINETEST_POSTGRESQL_CONNECT_STRING: 'host=localhost user=minetest password=minetest dbname=minetest'
 
@@ -37,6 +12,8 @@ jobs:
   gcc_7:
     runs-on: ubuntu-20.04
     steps:
+      - name: Disable parallel checkout (avoids a git race that can fail with 'unable to create symlink')
+        run: git config --global checkout.workers 1
       - uses: actions/checkout@v4
       - name: Install deps
         run: |
@@ -60,6 +37,8 @@ jobs:
   gcc_14:
     runs-on: ubuntu-24.04
     steps:
+      - name: Disable parallel checkout (avoids a git race that can fail with 'unable to create symlink')
+        run: git config --global checkout.workers 1
       - uses: actions/checkout@v4
       - name: Install deps
         run: |
@@ -84,6 +63,8 @@ jobs:
   clang_7:
     runs-on: ubuntu-20.04
     steps:
+      - name: Disable parallel checkout (avoids a git race that can fail with 'unable to create symlink')
+        run: git config --global checkout.workers 1
       - uses: actions/checkout@v4
       - name: Install deps
         run: |
@@ -111,6 +92,8 @@ jobs:
   clang_18:
     runs-on: ubuntu-24.04
     steps:
+      - name: Disable parallel checkout (avoids a git race that can fail with 'unable to create symlink')
+        run: git config --global checkout.workers 1
       - uses: actions/checkout@v4
       - name: Install deps
         run: |
@@ -137,6 +120,8 @@ jobs:
     name: "clang_11 (PROMETHEUS=1)"
     runs-on: ubuntu-22.04
     steps:
+      - name: Disable parallel checkout (avoids a git race that can fail with 'unable to create symlink')
+        run: git config --global checkout.workers 1
       - uses: actions/checkout@v4
       - name: Install deps
         run: |

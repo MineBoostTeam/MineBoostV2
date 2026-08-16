@@ -3,34 +3,7 @@ name: windows
 # build on c/cpp changes or workflow changes
 on:
   push:
-    paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'po/**.po'
-      - 'util/buildbot/**'
-      - 'misc/*.manifest'
-      - '.github/workflows/windows.yml'
   pull_request:
-    paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'po/**.po'
-      - 'util/buildbot/**'
-      - 'misc/*.manifest'
-      - '.github/workflows/windows.yml'
-
 jobs:
   mingw:
     name: "MinGW cross-compiler (${{ matrix.bits }}-bit)"
@@ -40,6 +13,8 @@ jobs:
       matrix:
         bits: [32, 64]
     steps:
+      - name: Disable parallel checkout (avoids a git race that can fail with 'unable to create symlink')
+        run: git config --global checkout.workers 1
       - uses: actions/checkout@v4
       - name: Install compiler
         run: |
@@ -94,6 +69,8 @@ jobs:
 # Enable it, when working on the installer.
 
     steps:
+      - name: Disable parallel checkout (avoids a git race that can fail with 'unable to create symlink')
+        run: git config --global checkout.workers 1
       - uses: actions/checkout@v4
 
       - name: Restore from cache and run vcpkg

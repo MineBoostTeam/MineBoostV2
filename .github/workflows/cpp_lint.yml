@@ -3,30 +3,7 @@ name: cpp_lint
 # lint on c/cpp changes or workflow changes
 on:
   push:
-    paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'util/ci/**'
-      - '.github/workflows/**.yml'
   pull_request:
-    paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'util/ci/**'
-      - '.github/workflows/**.yml'
-
 env:
   CLANG_TIDY: clang-tidy-15
 
@@ -34,6 +11,8 @@ jobs:
   clang_tidy:
     runs-on: ubuntu-22.04
     steps:
+    - name: Disable parallel checkout (avoids a git race that can fail with 'unable to create symlink')
+      run: git config --global checkout.workers 1
     - uses: actions/checkout@v4
     - name: Install deps
       run: |

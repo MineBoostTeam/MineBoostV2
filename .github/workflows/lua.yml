@@ -3,22 +3,15 @@ name: lua_lint
 # Lint on lua changes on builtin or if workflow changed
 on:
   push:
-    paths:
-      - 'builtin/**.lua'
-      - 'games/devtest/**.lua'
-      - '.github/workflows/**.yml'
   pull_request:
-    paths:
-      - 'builtin/**.lua'
-      - 'games/devtest/**.lua'
-      - '.github/workflows/**.yml'
-
 jobs:
   # Note that the integration tests are also run in build.yml, but only when C++ code is changed.
   integration_tests:
     name: "Compile and run multiplayer tests"
     runs-on: ubuntu-24.04
     steps:
+    - name: Disable parallel checkout (avoids a git race that can fail with 'unable to create symlink')
+      run: git config --global checkout.workers 1
     - uses: actions/checkout@v4
     - name: Install deps
       run: |
@@ -43,6 +36,8 @@ jobs:
 
     steps:
 
+    - name: Disable parallel checkout (avoids a git race that can fail with 'unable to create symlink')
+      run: git config --global checkout.workers 1
     - uses: actions/checkout@v4
     - uses: leafo/gh-actions-lua@v10
       with:
