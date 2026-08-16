@@ -33,6 +33,8 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
+    - name: Disable parallel checkout (avoids a git race that can fail with 'unable to create symlink')
+      run: git config --global checkout.workers 1
     - uses: actions/checkout@v4
     - name: Install deps
       run: |
@@ -49,6 +51,13 @@ jobs:
     - name: Build APKs with Gradle
       # "assemblerelease" is very fast after "bundlerelease".
       run: cd android; ./gradlew assemblerelease
+    - name: Build debug APKs with Gradle
+      # Unlike assemblerelease, "assembledebug" is auto-signed by Gradle
+      # with its built-in debug keystore, so these install straight on
+      # a phone without any manual apksigner/keystore step -- useful
+      # for testing MineBoostV2-GW builds without setting up release
+      # signing secrets in this fork.
+      run: cd android; ./gradlew assembledebug
     - name: Save AAB artifact
       uses: actions/upload-artifact@v4
       with:
@@ -74,3 +83,16 @@ jobs:
       with:
         name: Luanti-x86_64.apk
         path: android/app/build/outputs/apk/release/app-x86_64-release-unsigned.apk
+    - name: Save arm64 debug artifact
+      # This is the one to download and install directly on a phone --
+      # already signed, ready to install (Settings > allow install from
+      # this source, if prompted). Most modern phones are arm64-v8a.
+      uses: actions/upload-artifact@v4
+      with:
+        name: Luanti-arm64-v8a-debug.apk
+        path: android/app/build/outputs/apk/debug/app-arm64-v8a-debug.apk
+    - name: Save armeabi debug artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: Luanti-armeabi-v7a-debug.apk
+        path: android/app/build/outputs/apk/debug/app-armeabi-v7a-debug.apk

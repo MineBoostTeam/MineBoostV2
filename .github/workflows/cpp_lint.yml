@@ -34,6 +34,8 @@ jobs:
   clang_tidy:
     runs-on: ubuntu-22.04
     steps:
+    - name: Disable parallel checkout (avoids a git race that can fail with 'unable to create symlink')
+      run: git config --global checkout.workers 1
     - uses: actions/checkout@v4
     - name: Install deps
       run: |

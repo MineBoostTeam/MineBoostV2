@@ -29,6 +29,8 @@ jobs:
   trailing_whitespaces:
     runs-on: ubuntu-latest
     steps:
+      - name: Disable parallel checkout (avoids a git race that can fail with 'unable to create symlink')
+        run: git config --global checkout.workers 1
       - uses: actions/checkout@v4
       # Line endings are already ensured by .gitattributes
       - name: Check trailing whitespaces
@@ -37,6 +39,8 @@ jobs:
   tabs_lua_api_files:
     runs-on: ubuntu-latest
     steps:
+      - name: Disable parallel checkout (avoids a git race that can fail with 'unable to create symlink')
+        run: git config --global checkout.workers 1
       - uses: actions/checkout@v4
       # Some files should not contain tabs
       - name: Check tabs in Lua API files

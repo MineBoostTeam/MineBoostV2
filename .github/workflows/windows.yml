@@ -40,6 +40,8 @@ jobs:
       matrix:
         bits: [32, 64]
     steps:
+      - name: Disable parallel checkout (avoids a git race that can fail with 'unable to create symlink')
+        run: git config --global checkout.workers 1
       - uses: actions/checkout@v4
       - name: Install compiler
         run: |
@@ -94,6 +96,8 @@ jobs:
 # Enable it, when working on the installer.
 
     steps:
+      - name: Disable parallel checkout (avoids a git race that can fail with 'unable to create symlink')
+        run: git config --global checkout.workers 1
       - uses: actions/checkout@v4
 
       - name: Restore from cache and run vcpkg
