@@ -5,6 +5,7 @@
 // Copyright (C) 2010-2013 kwolekr, Ryan Kwolek <kwolekr@minetest.net>
 
 #include "client/hud.h"
+#include "client/perfmonitor.h"
 #include <string>
 #include <utility>
 #include <iostream>
@@ -28,6 +29,7 @@
 #include "fontengine.h"
 #include "guiscalingfilter.h"
 #include "mesh.h"
+#include "filesys.h"
 #include "gui/mainmenumanager.h"
 #include "wieldmesh.h"
 #include "client/renderingengine.h"
@@ -35,6 +37,8 @@
 #include "client/texturesource.h"
 #include "gui/touchcontrols.h"
 #include "client/macrolist.h"
+#include "gui/imgui_hud.h"
+#include "imgui.h" // IM_COL32() for gatherItemCell()'s wear-bar color
 #include "util/enriched_string.h"
 #include "irrlicht_changes/CGUITTFont.h"
 #include "IFileSystem.h"
@@ -44,41 +48,12 @@
 #define OBJECT_CROSSHAIR_LINE_SIZE 8
 #define CROSSHAIR_LINE_SIZE 10
 
-// Reads one of the "hud_color_*" settings (see defaultsettings.cpp) and
-// returns it as an SColor with the given alpha. Used both as a panel
-// background color (MusicHUD/InventoryHUD/CraftHUD/TargetHUD) and as an
-// image tint multiplier (PhotoHUD) -- see callers below. Falls back to
-// white (no visible change to a multiplied image, or a neutral panel
-// color) if the setting is somehow missing/malformed.
-static video::SColor getHudColorSetting(const std::string &setting, u32 alpha)
-{
-	v3f c = g_settings->getV3F(setting).value_or(v3f(255, 255, 255));
-	u32 r = rangelim(myround(c.X), 0, 255);
-	u32 g = rangelim(myround(c.Y), 0, 255);
-	u32 b = rangelim(myround(c.Z), 0, 255);
-	return video::SColor(alpha, r, g, b);
-}
-
-// Draws a HUD panel whose fill AND border both come from the same
-// "hud_color_*" setting (border just at full alpha, fill translucent),
-// so a single color pick in the "Colors" panel (see
-// src/gui/custom_menu/Menu.cpp) recolors the whole box. Shadow is
-// intentionally left off: ModernUI::dropShadow()'s rounded arcs poke out
-// past small HUD boxes' corners as solid dark smears rather than a soft
-// blur (it reads fine on the big 600x400 settings panels it was designed
-// for, not on ~140x30 HUD boxes) -- see the "Colors panel" branch of the
-// MineBoost changelog for the report.
-static void drawHudColorPanel(video::IVideoDriver *driver,
-		const core::rect<s32> &box, const std::string &setting)
-{
-	// Only the outline/border is user-colorable (see the "Colors" panel in
-	// src/gui/custom_menu/Menu.cpp) -- the fill stays this fixed dark
-	// shade for every HUD panel, same as it always was before per-element
-	// colors existed.
-	ModernUI::panel(driver, box, ModernUI::Radius,
-		video::SColor(190, 22, 24, 30), getHudColorSetting(setting, 255),
-		/*shadow=*/false);
-}
+// getHudColorSetting()/drawHudColorPanel() (the Irrlicht-drawing
+// versions of what src/gui/imgui_hud.cpp's hudColor()/drawPanel() now
+// do) used to live here -- removed as dead code once every element that
+// called them (KeyStroker/ShowCPS/Coords/ShowFPS/ShowPing/MusicHUD/
+// ShowRP/ConsumptionHUD/TargetHUD/InventoryHUD/CraftHUD) had been
+// rewritten onto ImGui.
 
 static void setting_changed_callback(const std::string &name, void *data)
 {
@@ -102,6 +77,10 @@ Hud::Hud(Client *client, LocalPlayer *player,
 		hbar_color = video::SColor(255, 255, 255, 255);
 
 	tsrc = client->getTextureSource();
+
+	// See src/client/photohud.h -- must be called after both driver and
+	// tsrc above are set.
+	m_photo_hud.init(driver, tsrc);
 
 	v3f crosshair_color = g_settings->getV3F("crosshair_color").value_or(v3f());
 	u32 cross_r = rangelim(myround(crosshair_color.X), 0, 255);
@@ -202,6 +181,8 @@ Hud::~Hud()
 
 	if (m_music_thumbnail_texture)
 		driver->removeTexture(m_music_thumbnail_texture);
+	if (m_rp_screenshot_texture)
+		driver->removeTexture(m_rp_screenshot_texture);
 }
 
 void Hud::drawItem(const ItemStack &item, const core::rect<s32>& rect,
@@ -972,56 +953,11 @@ void Hud::drawSelectionMesh()
 }
 
 namespace {
-	std::string formatMinSec(int total_seconds)
-	{
-		if (total_seconds < 0)
-			total_seconds = 0;
-		int m = total_seconds / 60;
-		int s = total_seconds % 60;
-		char buf[16];
-		porting::mt_snprintf(buf, sizeof(buf), "%d:%02d", m, s);
-		return buf;
-	}
-
-	// Draws a line of MusicHud text clipped to `rect`. If the text is
-	// wider than the rect, it scrolls left in a continuous, seamless loop
-	// instead of letting the HUD box grow to fit it -- this is what keeps
-	// the box a fixed size regardless of how long the track/artist name
-	// is.
-	void drawMarqueeLine(video::IVideoDriver *driver, gui::IGUIFont *font,
-			const std::wstring &wtext, const core::rect<s32> &rect,
-			video::SColor color)
-	{
-		if (wtext.empty())
-			return;
-
-		s32 text_w = font->getDimension(wtext.c_str()).Width;
-		s32 avail_w = rect.getWidth();
-
-		if (text_w <= avail_w) {
-			font->draw(wtext.c_str(), rect, color, false, true, &rect);
-			return;
-		}
-
-		// Two copies of the text, `cycle` pixels apart, both scrolling
-		// left together: as soon as the first copy has fully scrolled off
-		// the left edge, the second is already lined up to take its
-		// place, so the loop has no visible seam or pause. Integer math
-		// (not a float timer) avoids any long-session precision drift.
-		constexpr s32 gap_px = 40;
-		constexpr unsigned long long px_per_sec = 30;
-		s32 cycle = text_w + gap_px;
-		unsigned long long now_ms = porting::getTimeMs();
-		s32 offset = (s32)((now_ms * px_per_sec / 1000ULL) % (unsigned long long)cycle);
-
-		core::rect<s32> r1(rect.UpperLeftCorner.X - offset, rect.UpperLeftCorner.Y,
-			rect.UpperLeftCorner.X - offset + text_w, rect.LowerRightCorner.Y);
-		core::rect<s32> r2(r1.UpperLeftCorner.X + cycle, r1.UpperLeftCorner.Y,
-			r1.LowerRightCorner.X + cycle, r1.LowerRightCorner.Y);
-
-		font->draw(wtext.c_str(), r1, color, false, true, &rect);
-		font->draw(wtext.c_str(), r2, color, false, true, &rect);
-	}
+	// formatMinSec()/drawMarqueeLine() (the Irrlicht-drawing versions of
+	// what src/gui/imgui_hud.cpp's formatMinSec()/drawMarqueeText() now
+	// do) used to live here -- removed as dead code once drawMusicHud()/
+	// drawShowRp() below stopped calling them (see those functions'
+	// comments on the ImGuiHud rewrite).
 }
 
 void Hud::updateMusicThumbnail(const NowPlayingInfo &info)
@@ -1065,214 +1001,179 @@ void Hud::updateMusicThumbnail(const NowPlayingInfo &info)
 
 void Hud::drawMusicHud()
 {
-	if (!g_settings->getBool("music_hud"))
+	// Ground-up rewrite: this used to draw the panel/art/marquee text/
+	// progress bar itself; now just polls NowPlaying and updates the
+	// thumbnail texture cache (unchanged from before), then hands
+	// everything to ImGuiHud (src/gui/imgui_hud.h/.cpp) to actually draw
+	// later this frame. See the class comment on ImGuiHud for why.
+	if (!g_settings->getBool("music_hud")) {
+		ImGuiHud::get().updateMusicHud(ImGuiHud::MusicHudState());
 		return;
+	}
 
 	const NowPlayingInfo &info = m_now_playing.poll();
 	if (!info.active || info.title.empty()) {
 		updateMusicThumbnail(NowPlayingInfo()); // drop any cached art
+		ImGuiHud::get().updateMusicHud(ImGuiHud::MusicHudState());
 		return;
 	}
 
 	updateMusicThumbnail(info);
 
-	// Global size multiplier for MineBoost's custom HUD elements, combined
-	// with this HUD's own independent multiplier -- see "hud_size" and
-	// "music_hud_size" in src/gui/custom_menu/Menu.cpp ("HUD Size" slider
-	// and scroll-to-resize in "Move HUD" edit mode, respectively).
-	float hud_size = rangelim(g_settings->getFloat("hud_size"), 0.5f, 2.5f)
+	ImGuiHud::MusicHudState state;
+	state.visible = true;
+	state.source = info.source;
+	state.title = info.title;
+	state.artist = info.artist;
+	state.art_texture = m_music_thumbnail_texture;
+	state.has_progress = info.has_progress;
+	state.position_seconds = info.position_seconds;
+	state.duration_seconds = info.duration_seconds;
+	// Global size multiplier for MineBoost's custom HUD elements,
+	// combined with this HUD's own independent multiplier -- see
+	// "hud_size" and "music_hud_size" in src/gui/custom_menu/
+	// ImGuiMineBoostMenu.cpp ("HUD Size" slider and scroll-to-resize in
+	// "Move HUD" edit mode, respectively).
+	state.hud_size = rangelim(g_settings->getFloat("hud_size"), 0.5f, 2.5f)
 		* rangelim(g_settings->getFloat("music_hud_size"), 0.5f, 2.5f);
-	unsigned int scaled_font_size = (unsigned int)(g_fontengine->getDefaultFontSize() * hud_size);
-	gui::IGUIFont *font = g_fontengine->getFont(scaled_font_size);
-	if (!font)
-		return;
-
-	std::string line1 = info.source.empty() ? "" : ("[" + info.source + "]");
-	std::string line2 = info.title;
-	std::string line3 = info.artist;
-
-	std::wstring wline1 = utf8_to_wide(line1);
-	std::wstring wline2 = utf8_to_wide(line2);
-	std::wstring wline3 = utf8_to_wide(line3);
-
-	const s32 pad = (s32)(8 * hud_size);
-	const s32 line_h = font->getDimension(L"Ay").Height;
-	int num_text_lines = 1 + (wline1.empty() ? 0 : 1) + (wline3.empty() ? 0 : 1);
-
-	const bool show_art = m_music_thumbnail_texture != nullptr;
-	const s32 art_size = show_art ? std::max<s32>(num_text_lines * line_h, 32) : 0;
-	const s32 art_gap = show_art ? pad : 0;
-
-	const bool show_progress = info.has_progress && info.duration_seconds > 0;
-	const s32 bar_h = 4;
-	const s32 progress_block_h = show_progress ? (pad / 2 + bar_h + 2 + line_h) : 0;
-
-	const s32 content_h = std::max(art_size, num_text_lines * line_h);
-	// Text column has a fixed width (scaled to the current font size) so
-	// the box never grows to fit long track/artist names -- long text
-	// scrolls in place via drawMarqueeLine() instead. This keeps the HUD
-	// a consistent, predictable size no matter what's playing.
-	const s32 text_area_w = line_h * 9;
-	const s32 box_w = art_size + art_gap + text_area_w + pad * 2;
-	const s32 box_h = pad + content_h + progress_block_h + pad;
-
-	// Position is user-draggable via Shift+E edit mode in the MineBoost GUI
-	// (see src/gui/custom_menu/Menu.cpp, music_sprite). A saved X of -1
-	// means "never moved yet" -> default to the top-right corner.
-	s32 pos_x = g_settings->getS32("music_hud_x");
-	s32 pos_y = g_settings->getS32("music_hud_y");
-	if (pos_x < 0)
-		pos_x = (s32)m_screensize.X - box_w - 10;
-
-	core::rect<s32> box(
-		pos_x, pos_y,
-		pos_x + box_w, pos_y + box_h);
-
-	drawHudColorPanel(driver, box, "hud_color_music");
-
-	video::SColor source_color(255, 200, 200, 200);
-	if (info.source == "Spotify")
-		source_color = video::SColor(255, 30, 215, 96);
-	else if (info.source == "YouTube Music")
-		source_color = video::SColor(255, 255, 0, 0);
-	else if (info.source == "SoundCloud")
-		source_color = video::SColor(255, 255, 119, 0);
-	else if (info.source == "Yandex Music")
-		source_color = video::SColor(255, 255, 204, 0);
-
-	const video::SColor artist_color(255, 200, 200, 200);
-
-	s32 content_x = box.UpperLeftCorner.X + pad;
-
-	if (show_art) {
-		core::dimension2d<u32> tex_size = m_music_thumbnail_texture->getOriginalSize();
-		core::rect<s32> art_rect(content_x, box.UpperLeftCorner.Y + pad,
-			content_x + art_size, box.UpperLeftCorner.Y + pad + art_size);
-		core::rect<s32> src_rect(0, 0, (s32)tex_size.Width, (s32)tex_size.Height);
-		driver->draw2DImage(m_music_thumbnail_texture, art_rect, src_rect,
-			nullptr, nullptr, true);
-		content_x += art_size + art_gap;
-	}
-
-	s32 y = box.UpperLeftCorner.Y + pad;
-	s32 text_right = box.LowerRightCorner.X - pad;
-
-	if (!wline1.empty()) {
-		core::rect<s32> rect1(content_x, y, text_right, y + line_h);
-		drawMarqueeLine(driver, font, wline1, rect1, source_color);
-		y += line_h;
-	}
-
-	core::rect<s32> rect2(content_x, y, text_right, y + line_h);
-	drawMarqueeLine(driver, font, wline2, rect2, source_color);
-	y += line_h;
-
-	if (!wline3.empty()) {
-		core::rect<s32> rect3(content_x, y, text_right, y + line_h);
-		drawMarqueeLine(driver, font, wline3, rect3, artist_color);
-	}
-
-	if (show_progress) {
-		s32 bar_y = box.UpperLeftCorner.Y + pad + content_h + pad / 2;
-		s32 bar_x = box.UpperLeftCorner.X + pad;
-		s32 bar_w = box_w - pad * 2;
-
-		core::rect<s32> bar_bg(bar_x, bar_y, bar_x + bar_w, bar_y + bar_h);
-		ModernUI::roundedRectFilled(driver, bar_bg, bar_h / 2, video::SColor(200, 60, 60, 60));
-
-		f32 ratio = rangelim(
-			(f32)info.position_seconds / (f32)info.duration_seconds, 0.0f, 1.0f);
-		core::rect<s32> bar_fill(bar_x, bar_y, bar_x + (s32)(bar_w * ratio), bar_y + bar_h);
-		if (bar_fill.LowerRightCorner.X > bar_fill.UpperLeftCorner.X)
-			ModernUI::roundedRectFilled(driver, bar_fill, bar_h / 2, source_color);
-
-		s32 time_y = bar_y + bar_h + 2;
-		std::wstring wpos = utf8_to_wide(formatMinSec(info.position_seconds));
-		std::wstring wdur = utf8_to_wide(formatMinSec(info.duration_seconds));
-		s32 dur_w = font->getDimension(wdur.c_str()).Width;
-
-		core::rect<s32> pos_rect(bar_x, time_y, bar_x + bar_w / 2, time_y + line_h);
-		font->draw(wpos.c_str(), pos_rect, video::SColor(255, 190, 190, 190), false, true);
-
-		core::rect<s32> dur_rect(bar_x + bar_w - dur_w, time_y, bar_x + bar_w, time_y + line_h);
-		font->draw(wdur.c_str(), dur_rect, video::SColor(255, 190, 190, 190), false, true);
-	}
+	ImGuiHud::get().updateMusicHud(state);
 }
+
+
+// ShowRP: shows the currently active texture pack's own screenshot.png +
+// texture_pack.conf metadata (title, author) -- the exact same files/
+// convention a ContentDB package ships with and the main menu's content
+// browser reads (see load_texture_packs() in
+// builtin/mainmenu/content/pkgmgr.lua: "texture_path" is the active
+// pack's directory, "title"/"author" come from its texture_pack.conf,
+// falling back to the directory name for the title if that key isn't
+// set, same as pkgmgr.lua does). Same panel style/layout as MusicHud
+// just above (down to reusing its exact box-size formula), minus the
+// playback progress line -- there's nothing to track progress of here.
+//
+// Layout is deliberately fixed at 2 text lines' worth of room (title +
+// author) regardless of whether either is actually present for the
+// current pack -- if this shrank/grew per-pack, the "Move HUD" drag-
+// preview box in Menu.cpp (drawShowRpPreview(), which can't know any of
+// that at edit-mode time) would drift out of sync with it, the same bug
+// KeyStroker/ShowCPS/Coords all had before their size formulas were
+// fixed to be exact-match rather than approximate.
+void Hud::drawShowRp()
+{
+	// Ground-up rewrite: this used to draw the panel/screenshot/text
+	// itself; now just resolves the active texture pack's metadata
+	// (same caching -- only re-read when the pack actually changes) and
+	// hands it to ImGuiHud (src/gui/imgui_hud.h/.cpp) to actually draw
+	// later this frame. See the class comment on ImGuiHud for why.
+	if (!g_settings->getBool("show_rp")) {
+		ImGuiHud::get().updateShowRp(ImGuiHud::ShowRpState());
+		return;
+	}
+
+	std::string texture_path = g_settings->get("texture_path");
+
+	// Only re-read texture_pack.conf and reload the screenshot when the
+	// active texture pack actually changes, not every frame.
+	if (texture_path != m_rp_cached_texture_path) {
+		m_rp_cached_texture_path = texture_path;
+		m_rp_active = false;
+		m_rp_title.clear();
+		m_rp_author.clear();
+		if (m_rp_screenshot_texture) {
+			driver->removeTexture(m_rp_screenshot_texture);
+			m_rp_screenshot_texture = nullptr;
+		}
+
+		if (!texture_path.empty()) {
+			Settings pack_conf;
+			pack_conf.readConfigFile(
+				(texture_path + DIR_DELIM + "texture_pack.conf").c_str());
+
+			// Fallback title if texture_pack.conf doesn't set one: the
+			// pack's own directory name, same as pkgmgr.lua's
+			// "local title = conf:get(\"title\") or item".
+			std::string dir_name = texture_path;
+			while (!dir_name.empty() &&
+					(dir_name.back() == '/' || dir_name.back() == '\\'))
+				dir_name.pop_back();
+			size_t slash = dir_name.find_last_of("/\\");
+			if (slash != std::string::npos)
+				dir_name = dir_name.substr(slash + 1);
+
+			m_rp_title = pack_conf.exists("title") ? pack_conf.get("title") : dir_name;
+			m_rp_author = pack_conf.exists("author") ? pack_conf.get("author") : "";
+
+			std::string screenshot_path = texture_path + DIR_DELIM + "screenshot.png";
+			if (fs::PathExists(screenshot_path))
+				m_rp_screenshot_texture = driver->getTexture(screenshot_path.c_str());
+
+			m_rp_active = true;
+		}
+	}
+
+	ImGuiHud::ShowRpState state;
+	// Nothing to show for the built-in/base textures (texture_path
+	// empty). Unlike an older version of this function, a pack with
+	// neither a screenshot nor any metadata still shows the panel (with
+	// its directory name as the title) rather than being skipped.
+	state.visible = m_rp_active;
+	if (state.visible) {
+		state.title = m_rp_title;
+		state.author = m_rp_author;
+		state.screenshot_texture = m_rp_screenshot_texture;
+		state.hud_size = rangelim(g_settings->getFloat("hud_size"), 0.5f, 2.5f)
+			* rangelim(g_settings->getFloat("rp_hud_size"), 0.5f, 2.5f);
+	}
+	ImGuiHud::get().updateShowRp(state);
+}
+
+void Hud::drawConsumptionHud()
+{
+	// Ground-up rewrite: this used to draw the panel+text itself
+	// (Irrlicht font->draw()/drawHudColorPanel()); now just gathers the
+	// numbers and hands them to ImGuiHud (src/gui/imgui_hud.h/.cpp),
+	// which does the actual drawing later this same frame, via ImGui.
+	// See the class comment on ImGuiHud for exactly why this needs to
+	// be a "gather now, draw later" split rather than drawing directly
+	// from here.
+	ImGuiHud::ConsumptionHudState state;
+	state.visible = g_settings->getBool("consumption_hud");
+	if (state.visible) {
+		state.hud_size = rangelim(g_settings->getFloat("hud_size"), 0.5f, 2.5f)
+			* rangelim(g_settings->getFloat("consumption_hud_size"), 0.5f, 2.5f);
+
+		PerfMonitor &perf = PerfMonitor::get();
+		float ram_mb = perf.getRamMb();
+		float cpu_pct = perf.getCpuPercent();
+		float gpu_pct = perf.getGpuPercent();
+
+		// One line: "RAM: 512 MB  CPU: 12%  GPU: 34%" -- GPU segment
+		// only appears when actually available (see PerfMonitor::
+		// getGpuPercent() in src/client/perfmonitor.h: -1 means "not
+		// sampled on this platform/build", currently anywhere but
+		// Windows).
+		wchar_t buf[96];
+		if (gpu_pct >= 0.0f) {
+			swprintf(buf, 96, L"RAM: %d MB  CPU: %d%%  GPU: %d%%",
+				(int)(ram_mb + 0.5f), (int)(cpu_pct + 0.5f), (int)(gpu_pct + 0.5f));
+		} else {
+			swprintf(buf, 96, L"RAM: %d MB  CPU: %d%%",
+				(int)(ram_mb + 0.5f), (int)(cpu_pct + 0.5f));
+		}
+		state.text = buf;
+	}
+	ImGuiHud::get().updateConsumptionHud(state);
+}
+
 
 void Hud::drawPhotoHud()
 {
-	if (!g_settings->getBool("photo_hud"))
-		return;
-
-	// Only while some GUI (inventory/crafting/chest formspec, pause menu,
-	// the MineBoost settings menu, etc.) is actually open -- this draws
-	// before the GUI environment itself (see DrawHUD::run() in
-	// src/client/render/plain.cpp), so it naturally ends up *behind*
-	// whatever formspec is showing.
-	if (!isMenuActive())
-		return;
-
-	// One of 5 fixed, built-in images (textures/base/pack/face.png,
-	// cat_kuki.png, mellstroy.png, PawnWithBlackPeople.png,
-	// PawnWithTwoBlackPeoples.png) rather than a player-chosen file path --
-	// selected via "photo_hud_image" (see the Photo HUD picker panel in
-	// src/gui/custom_menu/Menu.cpp), and loaded through the texture
-	// source, like every other UI texture, so a texture pack can still
-	// override it. Cheap to call every frame; the texture source does
-	// its own caching.
-	std::string image = g_settings->get("photo_hud_image");
-	std::string texname = (image == "cat_kuki") ? "cat_kuki.png" :
-		(image == "mellstroy") ? "mellstroy.png" :
-		(image == "pawn_black") ? "PawnWithBlackPeople.png" :
-		(image == "pawn_two_black") ? "PawnWithTwoBlackPeoples.png" : "face.png";
-	video::ITexture *tex = tsrc->getTexture(texname);
-	if (!tex)
-		return;
-
-	core::dimension2du imgsize = tex->getOriginalSize();
-	if (imgsize.Width == 0 || imgsize.Height == 0)
-		return;
-
-	// Global size multiplier for MineBoost's custom HUD elements -- see
-	// "hud_size" in src/gui/custom_menu/Menu.cpp ("HUD Size" slider).
-	float hud_size = rangelim(g_settings->getFloat("hud_size"), 0.5f, 2.5f);
-
-	// A small image next to/near the GUI, same draggable placement as
-	// the other custom HUD elements.
-	s32 max_dim = std::max<s32>(16, (s32)(g_settings->getS32("photo_hud_size") * hud_size));
-	float scale = std::min(
-		(float)max_dim / (float)imgsize.Width,
-		(float)max_dim / (float)imgsize.Height);
-	s32 draw_w = std::max<s32>(1, (s32)(imgsize.Width * scale));
-	s32 draw_h = std::max<s32>(1, (s32)(imgsize.Height * scale));
-
-	// Position is user-draggable via Shift+E edit mode in the MineBoost GUI
-	// (see src/gui/custom_menu/Menu.cpp, photo_sprite). A saved X of -1
-	// means "never moved yet" -> default to screen center.
-	s32 pos_x = g_settings->getS32("photo_hud_x");
-	s32 pos_y = g_settings->getS32("photo_hud_y");
-	if (pos_x < 0)
-		pos_x = ((s32)m_screensize.X - draw_w) / 2;
-	if (pos_y < 0)
-		pos_y = ((s32)m_screensize.Y - draw_h) / 2;
-
-	core::rect<s32> dest(pos_x, pos_y, pos_x + draw_w, pos_y + draw_h);
-
-	// Frame behind the photo -- only its outline is user-colorable via
-	// "hud_color_photo" (see the "Colors" panel in
-	// src/gui/custom_menu/Menu.cpp); drawHudColorPanel()'s fill is a fixed
-	// shade, and the photo itself is drawn at its original colors below
-	// (no tint) -- shadow off so it doesn't smear at the corners the way
-	// ModernUI::dropShadow() used to on a box this small (see the comment
-	// on drawHudColorPanel() near the top of this file). Padded a few px
-	// outward so the frame is actually visible around an opaque photo.
-	core::rect<s32> frame(dest.UpperLeftCorner.X - 6, dest.UpperLeftCorner.Y - 6,
-		dest.LowerRightCorner.X + 6, dest.LowerRightCorner.Y + 6);
-	drawHudColorPanel(driver, frame, "hud_color_photo");
-
-	core::rect<s32> src(0, 0, imgsize.Width, imgsize.Height);
-	driver->draw2DImage(tex, dest, src, nullptr, nullptr, true);
+	// Thin forwarder -- see src/client/photohud.h/.cpp for the actual
+	// implementation (a ground-up rewrite; this used to be ~130 lines of
+	// PhotoHUD-specific logic inlined right here).
+	m_photo_hud.draw(m_screensize, isMenuActive());
 }
+
 
 // Debug HUD backgrounds: draws the same fixed-size ModernUI panel behind
 // the coords/FPS/ping debug text (set up in GameUI::update(), see
@@ -1289,119 +1190,174 @@ void Hud::drawPhotoHud()
 // Must run after GameUI::update() has positioned this frame's labels (it
 // reads the same settings) but before the GUI environment draws the static
 // text on top of it -- see DrawHUD::run() in src/client/render/plain.cpp.
-void Hud::drawDebugTextBackgrounds()
+// Coords/FPS/Ping -- ground-up rewrite onto ImGui (see the class comment
+// on ImGuiHud, src/gui/imgui_hud.h, and the "MineBoost:" comment on
+// GameUI::update() in src/client/gameui.cpp, which used to own the
+// actual text for these three). Split into 3 separate functions (rather
+// than the old shared draw_box() lambda) specifically so each one is its
+// own clean override point -- see the task this was written for.
+void Hud::drawCoordsHud()
 {
-	float hud_size = rangelim(g_settings->getFloat("hud_size"), 0.5f, 2.5f);
-	const u32 text_h = g_fontengine->getTextHeight();
-
-	auto draw_box = [&](const char *show_key, const char *pos_key,
-			const char *size_key, s32 default_y_offset, const char *color_key,
-			const wchar_t *dynamic_text = nullptr) {
-		if (!g_settings->getBool(show_key))
-			return;
-
-		float size = hud_size * rangelim(g_settings->getFloat(size_key), 0.5f, 2.5f);
-		s32 w = (s32)(140 * size);
-		s32 h = (s32)(30 * size);
-
-		// Coordinates vary a lot in digit count -- a couple of short
-		// digits near spawn vs. a long negative number far out -- so
-		// instead of always using the fixed 140px width above, measure
-		// the actual text at this frame's font size (same font/size
-		// GameUI::update() applies to m_guitext_coords, since "size" here
-		// is computed the exact same way coords_size is there) and widen
-		// the box to fit it, with some padding. Never shrinks below the
-		// 140px baseline, so short coordinates still get a normal-looking
-		// box instead of one clipped tight to 3-4 digits.
-		if (dynamic_text) {
-			gui::IGUIFont *font = g_fontengine->getFont(
-				(unsigned int)(g_fontengine->getDefaultFontSize() * size), FM_Unspecified);
-			if (font) {
-				s32 text_w = (s32)font->getDimension(dynamic_text).Width;
-				w = std::max(w, text_w + (s32)(24 * size));
-			}
-		}
-
-		s32 x, y;
-		if (g_settings->exists(pos_key)) {
-			v2f data = g_settings->getV2F(pos_key);
-			x = (s32)data.X;
-			y = (s32)data.Y;
-		} else {
-			// Same fallback formula as GameUI::update() in gameui.cpp, so
-			// the backdrop lines up with the real text before it's ever
-			// been dragged.
-			x = 5;
-			y = (s32)m_screensize.Y - default_y_offset - (s32)text_h;
-		}
-
-		core::rect<s32> box(x, y, x + w, y + h);
-		drawHudColorPanel(driver, box, color_key);
-	};
+	if (!g_settings->getBool("show_coords")) {
+		ImGuiHud::get().updateCoordsHud(ImGuiHud::SimpleTextHudState());
+		return;
+	}
 
 	std::ostringstream os(std::ios_base::binary);
 	os << std::setprecision(1) << std::fixed
 		<< "(" << "X: " << (player->getPosition().X / BS)
 		<< ", Y: " << (player->getPosition().Y / BS)
 		<< ", Z: " << (player->getPosition().Z / BS) << ")";
-	std::wstring coords_text = utf8_to_wide(os.str());
 
-	draw_box("show_coords", "coords_sprite", "coords_size", 5, "hud_color_coords", coords_text.c_str());
-	draw_box("show_fps", "fov_coords", "fps_size", 25, "hud_color_fps");
-	draw_box("show_ping", "ping_coords", "ping_size", 45, "hud_color_ping");
+	ImGuiHud::SimpleTextHudState state;
+	state.visible = true;
+	state.text = os.str();
+	state.hud_size = rangelim(g_settings->getFloat("hud_size"), 0.5f, 2.5f)
+		* rangelim(g_settings->getFloat("coords_size"), 0.5f, 2.5f);
+	state.color_setting = "hud_color_coords";
+	state.combined_v2f = true;
+	state.pos_setting = "coords_sprite";
+	state.default_y_offset = 5.0f;
+	ImGuiHud::get().updateCoordsHud(state);
 }
 
-// KeyStroker/ShowCPS background panels. These used to be a single baked
-// image (textures/base/pack/keys_panel_bg.png / cps_panel_bg.png) drawn
-// from builtin/client/keystroker.lua, tinted as a whole by
-// "hud_color_keystroker_border"/"hud_color_cps_border" -- but the border in that PNG is
-// baked-in pixel color (a fixed blue, confirmed by sampling it directly),
-// so a multiply-tint could only ever darken/shift that exact blue, never
-// actually recolor it to whatever the Colors panel says. Drawn here as a
-// real ModernUI panel instead (fixed fill + a genuinely separate,
-// genuinely colorable border, exactly like every other MineBoost HUD
-// panel), matching the same size/position math the Lua side already
-// derived: "keys_x"/"keys_y" ("cps_x"/"cps_y") are that panel's own
-// top-left corner (see the comment on base_pos in
-// update_hud_positions()/update_cps_hud_position() there), and its
-// rendered size is native_texture_size * BG_BASE_SCALE(2) * hud_size --
-// 160x160 for keys (80x80 native), 180x54 for cps (90x27 native). The
-// individual key icons/CPS text themselves are unaffected -- still drawn
-// by keystroker.lua as before, just with nothing behind them anymore.
-void Hud::drawKeyStrokerCpsBackgrounds()
+void Hud::drawFpsHud()
 {
-	float hud_size = rangelim(g_settings->getFloat("hud_size"), 0.5f, 2.5f);
-
-	if (g_settings->getBool("show_keys")) {
-		float size = hud_size * rangelim(g_settings->getFloat("keys_size"), 0.5f, 2.5f);
-		s32 x = g_settings->getS32("keys_x");
-		s32 y = g_settings->getS32("keys_y");
-		s32 w = (s32)(160 * size);
-		s32 h = (s32)(160 * size);
-		core::rect<s32> box(x, y, x + w, y + h);
-		drawHudColorPanel(driver, box, "hud_color_keystroker_border");
+	if (!g_settings->getBool("show_fps")) {
+		ImGuiHud::get().updateFpsHud(ImGuiHud::SimpleTextHudState());
+		m_fps_last_time_ms = 0;
+		return;
 	}
 
-	if (g_settings->getBool("show_cps")) {
-		float size = hud_size * rangelim(g_settings->getFloat("cps_size"), 0.5f, 2.5f);
-		s32 x = g_settings->getS32("cps_x");
-		s32 y = g_settings->getS32("cps_y");
-		s32 w = (s32)(180 * size);
-		s32 h = (s32)(54 * size);
-		core::rect<s32> box(x, y, x + w, y + h);
-		drawHudColorPanel(driver, box, "hud_color_cps_border");
+	// Hud doesn't have access to GameUI's own RunStats::dtime_jitter
+	// (the smoothed frametime average GameUI::update() used to derive
+	// FPS from) -- this is called from the render pipeline instead (see
+	// src/client/render/plain.cpp), not anywhere RunStats is passed
+	// through to. Computed independently here instead: a simple
+	// exponential moving average of the time between calls to this
+	// function (i.e. between frames), smoothed enough to be readable
+	// without needing RunStats' own jitter-averaging machinery.
+	u64 now_ms = porting::getTimeMs();
+	if (m_fps_last_time_ms != 0) {
+		float frame_dtime = std::max((now_ms - m_fps_last_time_ms) / 1000.0f, 0.0001f);
+		float instant_fps = 1.0f / frame_dtime;
+		m_fps_smoothed = m_fps_smoothed <= 0.0f ? instant_fps :
+			m_fps_smoothed * 0.9f + instant_fps * 0.1f;
 	}
+	m_fps_last_time_ms = now_ms;
+
+	ImGuiHud::SimpleTextHudState state;
+	state.visible = true;
+	state.text = "[FPS: " + std::to_string((int)(m_fps_smoothed + 0.5f)) + "]";
+	state.hud_size = rangelim(g_settings->getFloat("hud_size"), 0.5f, 2.5f)
+		* rangelim(g_settings->getFloat("fps_size"), 0.5f, 2.5f);
+	state.color_setting = "hud_color_fps";
+	state.combined_v2f = true;
+	state.pos_setting = "fov_coords";
+	state.default_y_offset = 25.0f;
+	ImGuiHud::get().updateFpsHud(state);
 }
 
-// Radial menu shown while the Macro Wheel key (default Tab) is held --
-// see Game::processMacroWheel() in src/client/game.cpp, which owns
-// macro_wheel_open/macro_wheel_selected and the actual key/scroll
-// handling; this function only reads them (plus MacroList) to render.
-// Irrlicht's 2D API has no filled-polygon primitive, so rather than true
-// pie wedges this draws the commands as a ring of boxes around the
-// center -- the same "arrange N choices in a circle" idea, just built
-// out of the same draw2DRectangle() calls every other MineBoost HUD
-// already uses.
+void Hud::drawPingHud()
+{
+	if (!g_settings->getBool("show_ping")) {
+		ImGuiHud::get().updatePingHud(ImGuiHud::SimpleTextHudState());
+		return;
+	}
+
+	ImGuiHud::SimpleTextHudState state;
+	state.visible = true;
+	state.text = "[Ping: " + std::to_string((int)(client->getRTT() * 1000.0f)) + " ms]";
+	state.hud_size = rangelim(g_settings->getFloat("hud_size"), 0.5f, 2.5f)
+		* rangelim(g_settings->getFloat("ping_size"), 0.5f, 2.5f);
+	state.color_setting = "hud_color_ping";
+	state.combined_v2f = true;
+	state.pos_setting = "ping_coords";
+	state.default_y_offset = 45.0f;
+	ImGuiHud::get().updatePingHud(state);
+}
+
+// KeyStroker/ShowCPS -- ground-up rewrite onto ImGui (see the class
+// comment on ImGuiHud). Key state read directly from LocalPlayer's own
+// control struct -- the same up/down/left/right/jump/aux1/sneak/dig/
+// place fields builtin/client/keystroker.lua used to read via
+// minetest.localplayer:get_control(), just from the C++ side instead
+// (see the "if false then" wrapping that file's own now-unused HUD
+// elements, with a comment explaining why and how to restore it).
+void Hud::drawKeyStrokerHud()
+{
+	if (!g_settings->getBool("show_keys")) {
+		ImGuiHud::get().updateKeyStrokerHud(ImGuiHud::KeyStrokerState());
+		return;
+	}
+
+	const PlayerControl &ctl = player->getPlayerControl();
+	ImGuiHud::KeyStrokerState state;
+	state.visible = true;
+	state.up = ctl.direction_keys & 1;
+	state.down = ctl.direction_keys & 2;
+	state.left = ctl.direction_keys & 4;
+	state.right = ctl.direction_keys & 8;
+	state.jump = ctl.jump;
+	state.aux1 = ctl.aux1;
+	state.sneak = ctl.sneak;
+	state.dig = ctl.dig;
+	state.place = ctl.place;
+	state.hud_size = rangelim(g_settings->getFloat("hud_size"), 0.5f, 2.5f)
+		* rangelim(g_settings->getFloat("keys_size"), 0.5f, 2.5f);
+	ImGuiHud::get().updateKeyStrokerHud(state);
+}
+
+void Hud::drawCpsHud()
+{
+	if (!g_settings->getBool("show_cps")) {
+		ImGuiHud::get().updateCpsHud(ImGuiHud::CpsState());
+		m_cps_lmb_clicks = 0;
+		m_cps_rmb_clicks = 0;
+		m_cps_lmb_timer = 0.0f;
+		m_cps_rmb_timer = 0.0f;
+		return;
+	}
+
+	// Same rising-edge-detect-then-reset-every-1s algorithm
+	// keystroker.lua's track_lmb_clicks()/track_rmb_clicks() used --
+	// dtime isn't directly available here (this is called from the
+	// render pipeline, see src/client/render/plain.cpp, not Client::step()),
+	// so it's derived from the same time source everything else in this
+	// file already uses for per-frame timing (porting::getTimeMs()).
+	u64 now_ms = porting::getTimeMs();
+	float dtime = m_cps_last_time_ms == 0 ? 0.0f :
+		std::min((now_ms - m_cps_last_time_ms) / 1000.0f, 1.0f);
+	m_cps_last_time_ms = now_ms;
+
+	const PlayerControl &ctl = player->getPlayerControl();
+	if (ctl.dig && !m_cps_lmb_was_down)
+		m_cps_lmb_clicks++;
+	m_cps_lmb_was_down = ctl.dig;
+	if (ctl.place && !m_cps_rmb_was_down)
+		m_cps_rmb_clicks++;
+	m_cps_rmb_was_down = ctl.place;
+
+	m_cps_lmb_timer += dtime;
+	if (m_cps_lmb_timer >= 1.0f) {
+		m_cps_lmb_clicks = 0;
+		m_cps_lmb_timer = 0.0f;
+	}
+	m_cps_rmb_timer += dtime;
+	if (m_cps_rmb_timer >= 1.0f) {
+		m_cps_rmb_clicks = 0;
+		m_cps_rmb_timer = 0.0f;
+	}
+
+	ImGuiHud::CpsState state;
+	state.visible = true;
+	state.lmb_cps = m_cps_lmb_clicks;
+	state.rmb_cps = m_cps_rmb_clicks;
+	state.hud_size = rangelim(g_settings->getFloat("hud_size"), 0.5f, 2.5f)
+		* rangelim(g_settings->getFloat("cps_size"), 0.5f, 2.5f);
+	ImGuiHud::get().updateCpsHud(state);
+}
+
 void Hud::drawMacroWheel()
 {
 	if (!macro_wheel_open)
@@ -1465,116 +1421,165 @@ void Hud::drawMacroWheel()
 
 void Hud::drawTargetHud()
 {
-	if (!target_hud_active || !g_settings->getBool("target_hud"))
+	// Ground-up rewrite: this used to draw the panel/avatar/name/HP bar
+	// itself; now just resolves the avatar texture + UV crops (still
+	// Irrlicht-side, since only this code knows the skin texture's own
+	// resolution) and hands everything to ImGuiHud (src/gui/imgui_hud.h/
+	// .cpp) to actually draw later this frame. See the class comment on
+	// ImGuiHud for why.
+	if (!target_hud_active || !g_settings->getBool("target_hud")) {
+		ImGuiHud::get().updateTargetHud(ImGuiHud::TargetHudState());
 		return;
+	}
 
-	// Global size multiplier for MineBoost's custom HUD elements, combined
-	// with this HUD's own independent multiplier -- see "hud_size" and
-	// "target_hud_size" in src/gui/custom_menu/Menu.cpp ("HUD Size" slider
-	// and scroll-to-resize in "Move HUD" edit mode, respectively).
-	float hud_size = rangelim(g_settings->getFloat("hud_size"), 0.5f, 2.5f)
+	ImGuiHud::TargetHudState state;
+	state.visible = true;
+	state.name = target_hud_name;
+	state.hp = target_hud_hp;
+	state.hp_max = target_hud_hp_max;
+	state.hud_size = rangelim(g_settings->getFloat("hud_size"), 0.5f, 2.5f)
 		* rangelim(g_settings->getFloat("target_hud_size"), 0.5f, 2.5f);
-	unsigned int scaled_font_size = (unsigned int)(g_fontengine->getDefaultFontSize() * hud_size);
-	gui::IGUIFont *font = g_fontengine->getFont(scaled_font_size);
-	if (!font)
-		return;
 
-	const s32 bar_w = (s32)(160 * hud_size);
-	const s32 bar_h = (s32)(10 * hud_size);
-	const s32 pad = (s32)(6 * hud_size);
-	const s32 line_h = font->getDimension(L"Ay").Height;
-
-	// Small avatar crop of the target's skin, shown to the left of the
-	// name/HP column. Player skins use the same head-front UV layout as
-	// Minecraft skins: an 8x8 square at (8,8) in a 64-px-wide texture
-	// (scaled up proportionally for higher-resolution skins), plus a
-	// second "hat/hair" overlay layer at (40,8), which we composite on
-	// top so hats, hair and facial accessories actually show up.
-	video::ITexture *avatar_texture = nullptr;
-	core::rect<s32> avatar_src;
-	core::rect<s32> avatar_overlay_src;
-	bool avatar_has_overlay = false;
-	s32 avatar_size = line_h + bar_h + pad; // roughly square, matches box content height
+	// Small avatar crop of the target's skin. Player skins use the same
+	// head-front UV layout as Minecraft skins: an 8x8 square at (8,8) in
+	// a 64-px-wide texture (scaled up proportionally for higher-
+	// resolution skins), plus a second "hat/hair" overlay layer at
+	// (40,8), composited on top so hats/hair/facial accessories actually
+	// show up. UVs are normalized (0..1) here, not pixel rects, since
+	// that's what ImGui::Image()/ImDrawList::AddImage() take -- see the
+	// comment on TargetHudState in imgui_hud.h.
 	if (!target_hud_skin.empty()) {
-		avatar_texture = tsrc->getTexture(target_hud_skin);
-		if (avatar_texture) {
+		if (video::ITexture *avatar_texture = tsrc->getTexture(target_hud_skin)) {
 			core::dimension2du sz = avatar_texture->getOriginalSize();
-			f32 scale = sz.Width > 0 ? sz.Width / 64.0f : 1.0f;
-			s32 fx = (s32)(8 * scale);
-			s32 fy = (s32)(8 * scale);
-			s32 fw = std::max<s32>(1, (s32)(8 * scale));
-			s32 fh = std::max<s32>(1, (s32)(8 * scale));
-			avatar_src = core::rect<s32>(fx, fy, fx + fw, fy + fh);
+			if (sz.Width > 0 && sz.Height > 0) {
+				f32 scale = sz.Width / 64.0f;
+				f32 fx = 8.0f * scale, fy = 8.0f * scale;
+				f32 fw = std::max(1.0f, 8.0f * scale), fh = std::max(1.0f, 8.0f * scale);
 
-			// The hat/hair layer sits to the right of the base head on
-			// the same row. Only use it if the texture is tall enough
-			// to actually contain that row (old 32-px-tall legacy skins
-			// without a second layer would otherwise sample garbage).
-			s32 ox = (s32)(40 * scale);
-			s32 oy = fy;
-			if (ox + fw <= (s32)sz.Width && oy + fh <= (s32)sz.Height) {
-				avatar_overlay_src = core::rect<s32>(ox, oy, ox + fw, oy + fh);
-				avatar_has_overlay = true;
+				state.avatar_texture = avatar_texture;
+				state.avatar_uv0_x = fx / sz.Width;
+				state.avatar_uv0_y = fy / sz.Height;
+				state.avatar_uv1_x = (fx + fw) / sz.Width;
+				state.avatar_uv1_y = (fy + fh) / sz.Height;
+
+				// The hat/hair layer sits to the right of the base head
+				// on the same row. Only use it if the texture is tall
+				// enough to actually contain that row (old 32-px-tall
+				// legacy skins without a second layer would otherwise
+				// sample garbage).
+				f32 ox = 40.0f * scale, oy = fy;
+				if (ox + fw <= sz.Width && oy + fh <= sz.Height) {
+					state.avatar_has_overlay = true;
+					state.overlay_uv0_x = ox / sz.Width;
+					state.overlay_uv0_y = oy / sz.Height;
+					state.overlay_uv1_x = (ox + fw) / sz.Width;
+					state.overlay_uv1_y = (oy + fh) / sz.Height;
+				}
 			}
 		}
 	}
-	s32 avatar_col_w = avatar_texture ? avatar_size + pad : 0;
 
-	std::wstring wname = utf8_to_wide(target_hud_name);
-	s32 name_w = font->getDimension(wname.c_str()).Width;
-	s32 text_col_w = std::max<s32>(bar_w, name_w);
-	s32 box_w = avatar_col_w + text_col_w + pad * 2;
-	s32 box_h = line_h + bar_h + pad * 3;
+	ImGuiHud::get().updateTargetHud(state);
+}
 
-	s32 x = m_displaycenter.X - box_w / 2;
-	s32 y = (s32)(m_screensize.Y * 0.16f); // default: a bit below the top, above the crosshair
+// Resolves one inventory slot to a flat-icon-only ImGuiHud::ItemCellState
+// -- shared by drawInventoryHud()/drawCraftHud() below. See the class
+// comment on ImGuiHud (src/gui/imgui_hud.h) for why this only handles
+// the flat-2D-icon case, not items that would need a 3D wielditem mesh
+// rendered into the slot (animated items / items with no inventory
+// image at all) -- those simply show no icon here, same as an empty
+// slot, rather than attempting something a 2D immediate-mode GUI
+// library has no way to actually do.
+static ImGuiHud::ItemCellState gatherItemCell(const ItemStack &item, Client *client, ITextureSource *tsrc)
+{
+	ImGuiHud::ItemCellState cell;
+	if (item.empty())
+		return cell;
 
-	// Position is user-draggable via the "Move HUD" corner button in the
-	// MineBoost GUI (see src/gui/custom_menu/Menu.cpp, target_hud_sprite).
-	s32 saved_x = g_settings->getS32("target_hud_x");
-	s32 saved_y = g_settings->getS32("target_hud_y");
-	if (saved_x >= 0)
-		x = saved_x;
-	if (saved_y >= 0)
-		y = saved_y;
+	auto *idef = client->idef();
+	const ItemDefinition &def = item.getDefinition(idef);
 
-	core::rect<s32> box(x, y, x + box_w, y + box_h);
-	drawHudColorPanel(driver, box, "hud_color_target");
+	std::string inventory_image = item.getInventoryImage(idef);
+	if (!inventory_image.empty())
+		cell.icon_texture = tsrc->getTexture(inventory_image);
 
-	if (avatar_texture) {
-		core::rect<s32> avatar_dst(
-			box.UpperLeftCorner.X + pad, box.UpperLeftCorner.Y + pad,
-			box.UpperLeftCorner.X + pad + avatar_size, box.UpperLeftCorner.Y + pad + avatar_size);
-		draw2DImageFilterScaled(driver, avatar_texture, avatar_dst, avatar_src);
-		if (avatar_has_overlay) {
-			draw2DImageFilterScaled(driver, avatar_texture, avatar_dst,
-				avatar_overlay_src, nullptr, nullptr, true);
+	std::string inventory_overlay = item.getInventoryOverlay(idef);
+	if (cell.icon_texture && !inventory_overlay.empty())
+		cell.overlay_texture = tsrc->getTexture(inventory_overlay);
+
+	if (def.type == ITEM_TOOL && item.wear != 0) {
+		cell.has_wear = true;
+		float wear = item.wear / 65535.0f;
+		cell.wear_fraction = wear;
+
+		// Same color gradient/WearBarParams handling as the old
+		// drawItemStack() (still used by the vanilla formspec/hotbar --
+		// see hud.cpp above) -- green -> yellow -> red as the tool wears
+		// out, or a mod-defined gradient via WearBarParams if the item
+		// registered one.
+		auto barParams = item.getWearBarParams(client->idef());
+		if (barParams.has_value()) {
+			f32 durability = 1.0f - wear;
+			video::SColor c = barParams->getWearBarColor(durability);
+			cell.wear_color = IM_COL32(c.getRed(), c.getGreen(), c.getBlue(), 255);
+		} else {
+			int wear_i = std::min((int)std::floor(wear * 600), 511);
+			wear_i = std::min(wear_i + 10, 511);
+			if (wear_i <= 255)
+				cell.wear_color = IM_COL32(wear_i, 255, 0, 255);
+			else
+				cell.wear_color = IM_COL32(255, 511 - wear_i, 0, 255);
 		}
 	}
 
-	s32 text_x = box.UpperLeftCorner.X + pad + avatar_col_w;
-	core::rect<s32> name_rect(text_x, box.UpperLeftCorner.Y + pad,
-		box.LowerRightCorner.X - pad, box.UpperLeftCorner.Y + pad + line_h);
-	font->draw(wname.c_str(), name_rect, video::SColor(255, 255, 255, 255), true, true);
+	const std::string &count_text = item.metadata.getString("count_meta");
+	if (item.count >= 2 || !count_text.empty())
+		cell.count_text = count_text.empty() ? itos(item.count) : count_text;
+	// Note: unlike the old drawItemStack(), a "count_alignment" metadata
+	// override (a formspec-only customization, rarely set outside
+	// custom crafted UI) is not honored here -- the count badge is
+	// always bottom-right, same as the vast majority of items already
+	// show. Not worth the extra complexity in a HUD-overlay grid, which
+	// (unlike a formspec slot) doesn't have per-slot layout metadata
+	// driving anything else about it either.
 
-	s32 bar_x = text_x + (text_col_w - bar_w) / 2;
-	s32 bar_y = box.UpperLeftCorner.Y + pad + line_h + pad;
-	core::rect<s32> bar_bg(bar_x, bar_y, bar_x + bar_w, bar_y + bar_h);
-	ModernUI::roundedRectFilled(driver, bar_bg, bar_h / 2, video::SColor(200, 40, 40, 40));
+	return cell;
+}
 
-	f32 ratio = target_hud_hp_max > 0 ? (f32)target_hud_hp / (f32)target_hud_hp_max : 0.0f;
-	ratio = rangelim(ratio, 0.0f, 1.0f);
-	video::SColor hp_color = ratio > 0.5f ? video::SColor(255, 60, 200, 60) :
-		ratio > 0.25f ? video::SColor(255, 230, 200, 40) : video::SColor(255, 220, 50, 50);
-	core::rect<s32> bar_fill(bar_x, bar_y, bar_x + (s32)(bar_w * ratio), bar_y + bar_h);
-	if (bar_fill.LowerRightCorner.X > bar_fill.UpperLeftCorner.X)
-		ModernUI::roundedRectFilled(driver, bar_fill, bar_h / 2, hp_color);
+// Builds the ImGuiHud::ItemGridState sections for one or more inventory
+// lists -- shared by drawInventoryHud()/drawCraftHud() below (identical
+// "grid of sections" shape either way, just different lists/titles/
+// settings).
+static void gatherItemGridSection(std::vector<ImGuiHud::ItemGridSection> &sections,
+		const std::string &title, InventoryList *list, Client *client, ITextureSource *tsrc)
+{
+	if (!list || list->getSize() == 0)
+		return;
+
+	ImGuiHud::ItemGridSection sec;
+	sec.title = title;
+	s32 count = (s32)list->getSize();
+	sec.cols = std::min<s32>(8, count);
+	sec.rows = (count + sec.cols - 1) / sec.cols;
+	sec.cells.reserve(count);
+	for (s32 i = 0; i < count; i++)
+		sec.cells.push_back(gatherItemCell(list->getItem(i), client, tsrc));
+
+	sections.push_back(std::move(sec));
 }
 
 void Hud::drawInventoryHud()
 {
-	if (!g_settings->getBool("inventory_hud"))
+	// Ground-up rewrite: this used to draw the whole grid itself; now
+	// just resolves each visible list's items to flat icons/wear/count
+	// (gatherItemGridSection() above) and hands the result to ImGuiHud
+	// (src/gui/imgui_hud.h/.cpp) to actually draw later this frame. See
+	// the class comment on ImGuiHud for why, and for the one real
+	// limitation (no 3D wielditem mesh rendering) this rewrite has.
+	if (!g_settings->getBool("inventory_hud")) {
+		ImGuiHud::get().updateInventoryHud(ImGuiHud::ItemGridState());
 		return;
+	}
 
 	InventoryList *mainlist = inventory->getList("main");
 	if (!mainlist || mainlist->getSize() == 0) {
@@ -1603,72 +1608,18 @@ void Hud::drawInventoryHud()
 				warningstream << std::endl;
 			}
 		}
+		ImGuiHud::get().updateInventoryHud(ImGuiHud::ItemGridState());
 		return;
 	}
 
-	gui::IGUIFont *font = g_fontengine->getFont();
-	if (!font) {
-		static bool warned = false;
-		if (!warned) {
-			warned = true;
-			warningstream << "InventoryHud: inventory_hud is enabled and the "
-				"\"main\" list has items, but g_fontengine->getFont() "
-				"returned null -- can't draw without a font." << std::endl;
-		}
-		return;
-	}
+	ImGuiHud::ItemGridState state;
+	gatherItemGridSection(state.sections, "Inventory", mainlist, client, tsrc);
 
-	// Reuse the hotbar's slot size/spacing so the grid matches the rest
-	// of the HUD visually, regardless of hud_scaling -- then apply this
-	// HUD's own independent size multiplier on top (see "inventory_hud_size"
-	// in src/gui/custom_menu/Menu.cpp, adjustable by scrolling over this
-	// HUD while in "Move HUD" edit mode).
-	float inventory_hud_size = rangelim(g_settings->getFloat("inventory_hud_size"), 0.5f, 2.5f);
-	const s32 slot = (s32)(m_hotbar_imagesize * inventory_hud_size);
-	const s32 slot_pad = (s32)(m_padding * inventory_hud_size);
-	const s32 pad = (s32)(8 * inventory_hud_size);
-	gui::IGUIFont *scaled_font = g_fontengine->getFont(
-		(unsigned int)(g_fontengine->getDefaultFontSize() * inventory_hud_size));
-	if (scaled_font)
-		font = scaled_font;
-	const s32 title_h = font->getDimension(L"Ay").Height + pad;
-	const s32 cell = slot + slot_pad * 2;
-
-	// One section per inventory list being displayed: always "main"
-	// ("Inventory"), plus whichever extra lists inventory_hud_extra_lists
-	// names and this server actually sends non-empty (e.g. "armor" if you
-	// want equipped armor folded in here instead of a separate HUD box).
-	// "craft"/"craftpreview" are intentionally never shown here even if
-	// listed -- the crafting grid has its own dedicated box, see
-	// Hud::drawCraftHud() below.
-	//
-	// Titles are pre-converted to wide strings here (rather than every
-	// frame in the render loop below) and the extra-list setting is only
-	// re-parsed when its raw value actually changes -- this setting is
-	// effectively static at runtime, so redoing str_split()/trim()/
-	// utf8_to_wide() on it hundreds of times a second was pure waste,
-	// especially noticeable on weak/low-end hardware.
-	struct Section {
-		std::wstring wtitle;
-		InventoryList *list;
-		s32 cols, rows;
-	};
-	std::vector<Section> sections;
-
-	auto addSection = [&](const std::wstring &wtitle, InventoryList *list) {
-		if (!list || list->getSize() == 0)
-			return;
-		s32 count = (s32)list->getSize();
-		s32 cols = std::min<s32>(8, count);
-		s32 rows = (count + cols - 1) / cols;
-		sections.push_back({wtitle, list, cols, rows});
-	};
-
-	static const std::wstring inventory_wtitle = utf8_to_wide("Inventory");
-	addSection(inventory_wtitle, mainlist);
-
+	// See the extra-list setting name below -- only re-parsed when its
+	// raw value actually changes, same caching this had before, since
+	// it's effectively static at runtime.
 	static std::string cached_extra_lists_raw;
-	static std::vector<std::pair<std::string, std::wstring>> cached_extra_lists;
+	static std::vector<std::pair<std::string, std::string>> cached_extra_lists;
 	std::string extra_lists_raw = g_settings->get("inventory_hud_extra_lists");
 	if (extra_lists_raw != cached_extra_lists_raw) {
 		cached_extra_lists_raw = extra_lists_raw;
@@ -1680,71 +1631,39 @@ void Hud::drawInventoryHud()
 				          // lists belong to CraftHud instead
 			std::string title = name;
 			title[0] = std::toupper((unsigned char)title[0]);
-			cached_extra_lists.emplace_back(name, utf8_to_wide(title));
+			cached_extra_lists.emplace_back(name, title);
 		}
 	}
 	for (const auto &entry : cached_extra_lists)
-		addSection(entry.second, inventory->getList(entry.first));
+		gatherItemGridSection(state.sections, entry.second, inventory->getList(entry.first), client, tsrc);
 
-	if (sections.empty())
+	if (state.sections.empty()) {
+		ImGuiHud::get().updateInventoryHud(ImGuiHud::ItemGridState());
 		return;
-
-	// Box width follows whichever section is widest (in columns); every
-	// section is left-aligned within that width rather than individually
-	// centered, so the sections visually line up as one coherent panel.
-	s32 max_cols = 0;
-	s32 box_h = pad * 2;
-	for (const Section &sec : sections) {
-		max_cols = std::max(max_cols, sec.cols);
-		box_h += title_h + sec.rows * cell;
 	}
-	const s32 box_w = max_cols * cell + pad * 2;
 
-	s32 x = m_displaycenter.X - box_w / 2;
-	s32 y = m_displaycenter.Y - box_h / 2;
-
-	// Position is user-draggable via the "Move HUD" corner button in the
-	// MineBoost GUI (see src/gui/custom_menu/Menu.cpp, inventory_hud_sprite).
-	s32 saved_x = g_settings->getS32("inventory_hud_x");
-	s32 saved_y = g_settings->getS32("inventory_hud_y");
-	if (saved_x >= 0)
-		x = saved_x;
-	if (saved_y >= 0)
-		y = saved_y;
-
-	core::rect<s32> box(x, y, x + box_w, y + box_h);
-	drawHudColorPanel(driver, box, "hud_color_inventory");
-
-	s32 section_y = box.UpperLeftCorner.Y;
-	for (const Section &sec : sections) {
-		core::rect<s32> title_rect(box.UpperLeftCorner.X + pad, section_y + pad / 2,
-			box.LowerRightCorner.X - pad, section_y + title_h);
-		font->draw(sec.wtitle.c_str(), title_rect, video::SColor(255, 255, 255, 255), false, true);
-
-		s32 count = (s32)sec.list->getSize();
-		for (s32 i = 0; i < count; i++) {
-			s32 col = i % sec.cols;
-			s32 row = i / sec.cols;
-			core::rect<s32> item_rect(0, 0, slot, slot);
-			item_rect += core::vector2d<s32>(
-				box.UpperLeftCorner.X + pad + slot_pad + col * cell,
-				section_y + title_h + pad + slot_pad + row * cell);
-			// Draw a distinct slot background + outline for every cell
-			// (even empty ones) so the grid actually reads as a set of
-			// slots instead of one undivided panel; drawItem() is told
-			// not to draw its own flat background on top of this.
-			ModernUI::panel(driver, item_rect, ModernUI::RadiusSmall, video::SColor(130, 40, 42, 52), video::SColor(150, 120, 150, 220), /*shadow=*/false);
-			drawItem(sec.list->getItem(i), item_rect, false, false);
-		}
-
-		section_y += title_h + sec.rows * cell;
-	}
+	state.visible = true;
+	// Reuse the hotbar's independent size multiplier convention -- see
+	// "inventory_hud_size" in src/gui/custom_menu/ImGuiMineBoostMenu.cpp
+	// ("Move HUD" edit mode scroll-to-resize).
+	state.hud_size = rangelim(g_settings->getFloat("hud_size"), 0.5f, 2.5f)
+		* rangelim(g_settings->getFloat("inventory_hud_size"), 0.5f, 2.5f);
+	state.color_setting = "hud_color_inventory";
+	state.x_setting = "inventory_hud_x";
+	state.y_setting = "inventory_hud_y";
+	ImGuiHud::get().updateInventoryHud(state);
 }
 
 void Hud::drawCraftHud()
 {
-	if (!g_settings->getBool("craft_hud"))
+	// Ground-up rewrite -- see drawInventoryHud() above and the class
+	// comment on ImGuiHud for the full story; InventoryHud/CraftHud
+	// share gatherItemCell()/gatherItemGridSection() above since they're
+	// otherwise identical "grid of item sections" layouts.
+	if (!g_settings->getBool("craft_hud")) {
+		ImGuiHud::get().updateCraftHud(ImGuiHud::ItemGridState());
 		return;
+	}
 
 	InventoryList *craftlist = inventory->getList("craft");
 	InventoryList *resultlist = inventory->getList("craftpreview");
@@ -1762,97 +1681,36 @@ void Hud::drawCraftHud()
 	// Only show the box while there's actually something in the craft
 	// grid or a result to show -- this is meant to answer "what's in my
 	// craft right now", not sit on screen as an empty panel at all times.
-	if (!listHasAnyItem(craftlist) && !listHasAnyItem(resultlist))
+	if (!listHasAnyItem(craftlist) && !listHasAnyItem(resultlist)) {
+		ImGuiHud::get().updateCraftHud(ImGuiHud::ItemGridState());
 		return;
-
-	gui::IGUIFont *font = g_fontengine->getFont();
-	if (!font)
-		return;
-
-	// See "craft_hud_size" in src/gui/custom_menu/Menu.cpp -- scroll over
-	// this HUD in "Move HUD" edit mode to resize it independently of the
-	// native hotbar/inventory scaling.
-	float craft_hud_size = rangelim(g_settings->getFloat("craft_hud_size"), 0.5f, 2.5f);
-	const s32 slot = (s32)(m_hotbar_imagesize * craft_hud_size);
-	const s32 slot_pad = (s32)(m_padding * craft_hud_size);
-	const s32 pad = (s32)(8 * craft_hud_size);
-	gui::IGUIFont *scaled_font = g_fontengine->getFont(
-		(unsigned int)(g_fontengine->getDefaultFontSize() * craft_hud_size));
-	if (scaled_font)
-		font = scaled_font;
-	const s32 title_h = font->getDimension(L"Ay").Height + pad;
-	const s32 cell = slot + slot_pad * 2;
-
-	struct Section {
-		std::wstring wtitle;
-		InventoryList *list;
-		s32 cols, rows;
-	};
-	std::vector<Section> sections;
-
-	auto addSection = [&](const std::wstring &wtitle, InventoryList *list) {
-		if (!list || list->getSize() == 0)
-			return;
-		s32 count = (s32)list->getSize();
-		s32 cols = std::min<s32>(8, count);
-		s32 rows = (count + cols - 1) / cols;
-		sections.push_back({wtitle, list, cols, rows});
-	};
-
-	static const std::wstring craft_wtitle = utf8_to_wide("Craft");
-	static const std::wstring result_wtitle = utf8_to_wide("Result");
-	addSection(craft_wtitle, craftlist);
-	addSection(result_wtitle, resultlist);
-
-	if (sections.empty())
-		return;
-
-	s32 max_cols = 0;
-	s32 box_h = pad * 2;
-	for (const Section &sec : sections) {
-		max_cols = std::max(max_cols, sec.cols);
-		box_h += title_h + sec.rows * cell;
 	}
-	const s32 box_w = max_cols * cell + pad * 2;
 
+	ImGuiHud::ItemGridState state;
+	gatherItemGridSection(state.sections, "Craft", craftlist, client, tsrc);
+	gatherItemGridSection(state.sections, "Result", resultlist, client, tsrc);
+
+	if (state.sections.empty()) {
+		ImGuiHud::get().updateCraftHud(ImGuiHud::ItemGridState());
+		return;
+	}
+
+	state.visible = true;
+	// See "craft_hud_size" in src/gui/custom_menu/ImGuiMineBoostMenu.cpp
+	// -- scroll over this HUD in "Move HUD" edit mode to resize it
+	// independently of the native hotbar/inventory scaling.
+	state.hud_size = rangelim(g_settings->getFloat("hud_size"), 0.5f, 2.5f)
+		* rangelim(g_settings->getFloat("craft_hud_size"), 0.5f, 2.5f);
+	state.color_setting = "hud_color_craft";
+	state.x_setting = "craft_hud_x";
+	state.y_setting = "craft_hud_y";
 	// Default position: to the right of screen center, so it doesn't
-	// overlap InventoryHud's default (centered) position out of the box.
-	s32 x = m_displaycenter.X + cell;
-	s32 y = m_displaycenter.Y - box_h / 2;
-
-	// Position is user-draggable via the "Move HUD" corner button in the
-	// MineBoost GUI (see src/gui/custom_menu/Menu.cpp, craft_hud_sprite).
-	s32 saved_x = g_settings->getS32("craft_hud_x");
-	s32 saved_y = g_settings->getS32("craft_hud_y");
-	if (saved_x >= 0)
-		x = saved_x;
-	if (saved_y >= 0)
-		y = saved_y;
-
-	core::rect<s32> box(x, y, x + box_w, y + box_h);
-	drawHudColorPanel(driver, box, "hud_color_craft");
-
-	s32 section_y = box.UpperLeftCorner.Y;
-	for (const Section &sec : sections) {
-		core::rect<s32> title_rect(box.UpperLeftCorner.X + pad, section_y + pad / 2,
-			box.LowerRightCorner.X - pad, section_y + title_h);
-		font->draw(sec.wtitle.c_str(), title_rect, video::SColor(255, 255, 255, 255), false, true);
-
-		s32 count = (s32)sec.list->getSize();
-		for (s32 i = 0; i < count; i++) {
-			s32 col = i % sec.cols;
-			s32 row = i / sec.cols;
-			core::rect<s32> item_rect(0, 0, slot, slot);
-			item_rect += core::vector2d<s32>(
-				box.UpperLeftCorner.X + pad + slot_pad + col * cell,
-				section_y + title_h + pad + slot_pad + row * cell);
-			ModernUI::panel(driver, item_rect, ModernUI::RadiusSmall, video::SColor(130, 40, 42, 52), video::SColor(150, 120, 150, 220), /*shadow=*/false);
-			drawItem(sec.list->getItem(i), item_rect, false, false);
-		}
-
-		section_y += title_h + sec.rows * cell;
-	}
+	// overlap InventoryHud's default (centered) position -- see
+	// renderItemGrid() in src/gui/imgui_hud.cpp.
+	state.default_x_offset = 80.0f;
+	ImGuiHud::get().updateCraftHud(state);
 }
+
 
 // ArmorHUD temporarily disabled -- entire implementation commented out
 // below. Re-enable by removing the #if 0 / #endif wrapper (and the

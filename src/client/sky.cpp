@@ -19,6 +19,7 @@
 #include "client/texturesource.h"
 #include "settings.h"
 #include "camera.h" // CameraModes
+#include "filesys.h" // fs::PathExists, for loadSkyboxFaceTexture()
 
 using namespace irr::core;
 
@@ -80,7 +81,7 @@ Sky::Sky(s32 id, RenderingEngine *rendering_engine, ITextureSource *tsrc, IShade
 			m_materials[i] = baseMaterial();
 
 				m_sky_params.textures.emplace_back(SkyTextures[i - 5]);
-				video::ITexture *result = tsrc->getTextureForMesh(SkyTextures[i - 5]);
+				video::ITexture *result = loadSkyboxFaceTexture(i - 5, tsrc);
 				m_materials[i] = baseMaterial();
 				m_materials[i].setTexture(0, result);
 				m_materials[i].MaterialType = video::EMT_SOLID;
@@ -907,13 +908,35 @@ void Sky::setHorizonTint(video::SColor sun_tint, video::SColor moon_tint,
 		m_default_tint = true;
 }
 
+// Per-face custom skybox texture (MineBoost): prefers a player-supplied
+// absolute path from "skybox_texture_<face>" (see SkyTextureSettings[] in
+// sky.h) if it's set and actually loads, otherwise falls back to the
+// built-in SkyTextures[index] mesh texture -- same "empty/missing/unreadable
+// silently falls back" behavior as "photo_hud_custom_path" (see
+// Hud::drawPhotoHud() in src/client/hud.cpp).
+video::ITexture *Sky::loadSkyboxFaceTexture(int index, ITextureSource *tsrc)
+{
+	std::string custom_path = g_settings->get(SkyTextureSettings[index]);
+	if (!custom_path.empty() && fs::PathExists(custom_path)) {
+		video::IVideoDriver *driver = RenderingEngine::get_video_driver();
+		video::ITexture *tex = driver->getTexture(custom_path.c_str());
+		if (tex)
+			return tex;
+		warningstream << "[SKYBOX]: Failed to load custom texture \""
+			<< custom_path << "\" for face \"" << SkyTextureSettings[index]
+			<< "\", falling back to built-in \"" << SkyTextures[index]
+			<< "\"." << std::endl;
+	}
+	return tsrc->getTextureForMesh(SkyTextures[index]);
+}
+
 void Sky::addTextureToSkybox(const std::string &texture, int material_id,
 		ITextureSource *tsrc)
 {
 	if (g_settings->getBool("force_custom_skybox")) {
 		try {
 			m_sky_params.textures.emplace_back(SkyTextures[material_id]);
-			video::ITexture* result = tsrc->getTextureForMesh(SkyTextures[material_id]);
+			video::ITexture* result = loadSkyboxFaceTexture(material_id, tsrc);
 			m_materials[material_id + 5] = baseMaterial();
 			m_materials[material_id + 5].setTexture(0, result);
 			m_materials[material_id + 5].MaterialType = video::EMT_SOLID;

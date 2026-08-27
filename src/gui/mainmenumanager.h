@@ -12,6 +12,7 @@
 #include <list>
 
 #include "IGUIEnvironment.h"
+#include "custom_menu/ImGuiMineBoostMenu.h"
 
 namespace irr::gui {
 	class IGUIStaticText;
@@ -101,7 +102,12 @@ extern MainMenuManager g_menumgr;
 
 static inline bool isMenuActive()
 {
-	return g_menumgr.menuCount() != 0;
+	// MineBoost: the ImGui settings menu is a separate singleton, not
+	// pushed onto g_menumgr like the old Irrlicht-based Menu was -- without
+	// this check, the camera/cursor code in Game::updateCameraDirection()
+	// (src/client/game.cpp) never learns it's open, so mouse-look/relative
+	// mode stays engaged and the OS cursor stays hidden right through it.
+	return g_menumgr.menuCount() != 0 || ImGuiMineBoostMenu::get().isOpen();
 }
 
 class MainGameCallback : public IGameCallback

@@ -78,6 +78,17 @@ public:
 	// True if we've heard from this name recently enough to still trust it.
 	bool isMineBoostUser(const std::string &name, unsigned long long now_ms) const;
 
+	// Cheap pre-check for Camera::drawMineBoostBadges(): true if there's
+	// *anyone* worth even looking for this frame. Doesn't do the EXPIRY_MS
+	// check isMineBoostUser() does per-name (m_last_seen_ms entries are
+	// never individually erased on expiry, only wholesale on reset() --
+	// see noteSeen()/reset() below), so this can be true for a session
+	// that saw a MineBoost user a while ago and hasn't since; that's fine,
+	// it only guards the expensive "walk every active object" path below,
+	// isMineBoostUser() still does the real per-player expiry check
+	// exactly as before once inside that loop.
+	bool hasAnyRecentUsers() const { return !m_last_seen_ms.empty(); }
+
 	// Forgets everyone. Called on disconnect/reconnect so a badge seen
 	// on one server can't linger into the next one.
 	void reset();

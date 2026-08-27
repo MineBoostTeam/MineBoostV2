@@ -6,6 +6,10 @@ set(gui_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/guiButtonImage.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/guiButtonItemImage.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/guiChatConsole.cpp
+	# MineBoost: ClientChat temporarily disabled -- file kept in the tree
+	# for restoring later, just not compiled in. See the comment on the
+	# "gui/guiClientChat.h" include in src/client/game.cpp.
+	# ${CMAKE_CURRENT_SOURCE_DIR}/guiClientChat.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/guiEditBox.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/guiEditBoxWithScrollbar.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/guiEngine.cpp
@@ -29,8 +33,20 @@ set(gui_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/touchscreeneditor.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/Sprite.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/SpriteManager.cpp
-	${CMAKE_CURRENT_SOURCE_DIR}/custom_menu/Items.cpp
-	${CMAKE_CURRENT_SOURCE_DIR}/custom_menu/Menu.cpp
-	${CMAKE_CURRENT_SOURCE_DIR}/custom_menu/Button.cpp
+	# MineBoost: the old Irrlicht-custom-widget settings menu (Items/
+	# Menu/Button/PhotoHudSettingsMenu) has been replaced by the new
+	# Dear ImGui-based ImGuiMineBoostMenu below -- these 4 files are kept
+	# in the tree purely as reference for whatever hasn't been ported yet
+	# (currently just "Move HUD" drag-repositioning, which still lives in
+	# Menu.cpp -- see the note on this in ImGuiMineBoostMenu.h), but are
+	# no longer built.
+	# ${CMAKE_CURRENT_SOURCE_DIR}/custom_menu/Items.cpp
+	# ${CMAKE_CURRENT_SOURCE_DIR}/custom_menu/Menu.cpp
+	# ${CMAKE_CURRENT_SOURCE_DIR}/custom_menu/Button.cpp
+	# ${CMAKE_CURRENT_SOURCE_DIR}/custom_menu/PhotoHudSettingsMenu.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/custom_menu/ImGuiMineBoostMenu.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/ImGuiManager.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/imgui_texture_bridge.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/imgui_hud.cpp
 	PARENT_SCOPE
 )

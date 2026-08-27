@@ -54,6 +54,7 @@ set(client_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/game_formspec.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/guiscalingfilter.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/hud.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/photohud.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/imagefilters.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/inputhandler.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/joystick_controller.cpp
@@ -68,6 +69,11 @@ set(client_SRCS
 	${CMAKE_CURRENT_SOURCE_DIR}/minimap.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/nowplaying.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/mineboost_presence.cpp
+	# MineBoost: ClientChat temporarily disabled -- file kept in the tree
+	# for restoring later, just not compiled in. See the comment on the
+	# "gui/guiClientChat.h" include in src/client/game.cpp.
+	# ${CMAKE_CURRENT_SOURCE_DIR}/clientchat.cpp
+	${CMAKE_CURRENT_SOURCE_DIR}/perfmonitor.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/particles.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/renderingengine.cpp
 	${CMAKE_CURRENT_SOURCE_DIR}/shader.cpp

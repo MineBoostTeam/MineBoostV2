@@ -46,7 +46,17 @@ struct FpsControl {
 
 	void reset();
 
-	void limit(IrrlichtDevice *device, f32 *dtime, bool assume_paused = false);
+	// Whether to throttle to "fps_max" or "fps_max_unfocused" is decided
+	// purely by IrrlichtDevice::isWindowFocused() below -- there used to
+	// be an extra "assume_paused" parameter here (removed) that also
+	// switched to fps_max_unfocused whenever g_menumgr.pausesGame() was
+	// true, i.e. whenever any modal menu (inventory, chest, the pause
+	// menu, ...) was open -- even though the window itself, and thus the
+	// player looking right at it, was still every bit as focused as
+	// before opening it. "FPS when unfocused" (fps_max_unfocused's own
+	// settingtypes.txt label) means unfocused, not "menu open", so that
+	// was applying it while the window was still focused.
+	void limit(IrrlichtDevice *device, f32 *dtime);
 
 	u32 getBusyMs() const { return busy_time / 1000; }
 

@@ -299,6 +299,9 @@ if(WIN32)
 		)
 	endif()
 	list(APPEND PLATFORM_LIBS ws2_32.lib version.lib shlwapi.lib winmm.lib)
+	# ConsumptionHUD's PerfMonitor (src/client/perfmonitor.cpp): Pdh for
+	# per-process GPU usage, Psapi for GetProcessMemoryInfo.
+	list(APPEND PLATFORM_LIBS pdh.lib psapi.lib)
 
 	if(BUILD_CLIENT)
 		# Used by MusicHud for Windows System Media Transport Controls
@@ -328,9 +331,22 @@ if(WIN32)
 			# Only nowplaying.cpp needs C++20 (for the same coroutine-support
 			# requirement as above) -- keep the rest of the project on C++17
 			# by overriding the standard for just this one translation unit.
+			#
+			# Deliberately NOT done via a raw COMPILE_OPTIONS "-std=c++20"
+			# string: that's GCC/Clang-only syntax. Under MSVC, cl.exe
+			# doesn't recognize "-std=c++20" at all -- it just emits a
+			# D9002 "ignoring unknown option" warning and silently keeps
+			# compiling this file under the project's global /std:c++17,
+			# so winrt/base.h's coroutine requirement then fails to
+			# compile for real. The CXX_STANDARD source-file property
+			# below is the portable way to do this: CMake translates it
+			# to the right compiler-specific flag either way (/std:c++20
+			# for MSVC, -std=c++20/-std=gnu++20 for GCC/Clang/MinGW).
 			set_source_files_properties(
 				"${CMAKE_CURRENT_SOURCE_DIR}/client/nowplaying.cpp"
-				PROPERTIES COMPILE_OPTIONS "-std=c++20"
+				PROPERTIES
+					CXX_STANDARD 20
+					CXX_STANDARD_REQUIRED ON
 			)
 		else()
 			message(STATUS "winrt/Windows.Media.Control.h not found; MusicHud album art/progress "
@@ -683,6 +699,13 @@ if(BUILD_CLIENT)
 		add_library(${PROJECT_NAME} SHARED)
 	else()
 		add_executable(${PROJECT_NAME})
+		# Output binary is "mbv2"/"mbv2.exe" -- deliberately only the
+		# final filename, via OUTPUT_NAME, rather than renaming
+		# PROJECT_NAME itself: PROJECT_NAME feeds RUN_IN_PLACE's share/
+		# and user/ directory names, the macOS bundle name, etc. further
+		# down this file, none of which should change just because the
+		# .exe's filename does.
+		set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "mbv2")
 	endif()
 
 
@@ -744,6 +767,7 @@ if(BUILD_CLIENT)
 		${JSON_LIBRARY}
 		${LUA_BIT_LIBRARY}
 		sha256
+		imgui
 		${FREETYPE_LIBRARY}
 		${PLATFORM_LIBS}
 		# on Android, Luanti depends on SDL2 directly

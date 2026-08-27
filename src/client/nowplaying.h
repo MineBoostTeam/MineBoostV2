@@ -42,13 +42,13 @@ struct NowPlayingInfo
 	std::string source;
 
 	// Playback position, when the backend can provide it (currently
-	// Windows SMTC only).
+	// Windows SMTC and macOS).
 	bool has_progress = false;
 	int position_seconds = 0;
 	int duration_seconds = 0;
 
 	// Raw encoded album art bytes (PNG/JPEG, whatever the source app
-	// provided), when available (currently Windows SMTC only).
+	// provided), when available (currently Windows SMTC and macOS).
 	// thumbnail_id changes any time the artwork changes, so a caller
 	// that's cached a decoded texture can cheaply tell "is this still
 	// the same image" without comparing thumbnail_data itself.

@@ -122,7 +122,32 @@ void set_default_settings()
 	// full protocol. The client POSTs to "<this>/presence" (see
 	// MineBoostPresence::step() in src/client/mineboost_presence.cpp) --
 	// no trailing slash here, that's added there.
-	settings->setDefault("mineboost_presence_server_url", "https://node-server--Pryanilk.replit.app");
+	settings->setDefault("mineboost_presence_server_url", "https://project--Pryanilk.replit.app");
+	// ClientChat -- global, cross-server chat for MineBoostV2 players,
+	// authenticated via Discord (device-code flow) -- see
+	// src/client/clientchat.h for the full protocol. Same server as the
+	// presence one above by default (both are the same Node app on
+	// Replit), but kept as its own setting in case that ever changes.
+	settings->setDefault("clientchat_server_url", "https://project--Pryanilk.replit.app");
+	// URL the "Login with Discord" button in the ClientChat window opens
+	// (see GUIClientChat::openDiscordLink() in src/gui/guiClientChat.cpp)
+	// -- a Discord invite, or a login page on your own ClientChat server,
+	// whatever's appropriate for how "clientchat_server_url" above issues
+	// sessions. Left empty on purpose (no server of ours to point this at
+	// by default); the button shows "not configured" rather than opening
+	// nothing until this is set.
+	settings->setDefault("clientchat_discord_url", "");
+	// Cached session/friends (see ClientChat::saveCachedSession()/
+	// saveFriendIds() in src/client/clientchat.cpp) -- like the
+	// hud_color_* settings, not meant to be hand-edited, so deliberately
+	// not in settingtypes.txt. Left unset here on purpose: their
+	// *presence* (not their value) controls whether ClientChat
+	// auto-resumes a previous login on startup, so an empty
+	// non-existent default is correct, not "".
+	settings->setDefault("keymap_clientchat", "KEY_KEY_G");
+	// Toggles the Dear ImGui demo/test window -- see
+	// ImGuiManager::checkDemoToggleKey() in src/gui/ImGuiManager.cpp.
+	settings->setDefault("keymap_imgui_demo", "KEY_F9");
 	settings->setDefault("curl_verify_cert", "true");
 	settings->setDefault("enable_remote_media_server", "true");
 	settings->setDefault("enable_client_modding", "true");
@@ -384,6 +409,22 @@ void set_default_settings()
 	settings->setDefault("force_custom_skybox", "false");
 	settings->setDefault("force_render_skybox", "true");
 	settings->setDefault("disable_stars", "false");
+	// Per-face custom skybox textures (MineBoost). Absolute filesystem
+	// path to an image for each of the 6 skybox faces -- loaded straight
+	// off disk with IVideoDriver::getTexture(), same mechanism as
+	// "photo_hud_custom_path" (see Hud::drawPhotoHud() in
+	// src/client/hud.cpp), not through the mod texture source, since
+	// these aren't game/mod assets. Order matches Sky::SkyTextures[] in
+	// src/client/sky.h (top, bottom, east, west, south, north). Any face
+	// left empty (or pointing at a missing/unreadable file) falls back
+	// to the built-in top.jpg/bottom.jpg/etc. mesh textures exactly as
+	// before -- see Sky::loadSkyboxFaceTexture() in src/client/sky.cpp.
+	settings->setDefault("skybox_texture_top", "");
+	settings->setDefault("skybox_texture_bottom", "");
+	settings->setDefault("skybox_texture_east", "");
+	settings->setDefault("skybox_texture_west", "");
+	settings->setDefault("skybox_texture_south", "");
+	settings->setDefault("skybox_texture_north", "");
 
 	// User Interface
 	settings->setDefault("show_coords", "false");
@@ -412,6 +453,8 @@ void set_default_settings()
 	settings->setDefault("target_highlight_particle_amount", "18");
 	settings->setDefault("hit_particle_amount", "120");
 	settings->setDefault("music_hud", "true");
+	settings->setDefault("show_rp", "false");
+	settings->setDefault("consumption_hud", "false");
 	settings->setDefault("inventory_hud", "true");
 	// Extra inventory lists to show as additional labeled sections within
 	// the same InventoryHud box, below the main grid -- comma-separated
@@ -454,6 +497,8 @@ void set_default_settings()
 	settings->setDefault("hud_color_ping", "(255,255,255)");
 	settings->setDefault("hud_color_photo", "(255,255,255)");
 	settings->setDefault("hud_color_music", "(22,24,30)");
+	settings->setDefault("hud_color_rp", "(22,24,30)");
+	settings->setDefault("hud_color_consumption", "(22,24,30)");
 	settings->setDefault("hud_color_inventory", "(22,24,30)");
 	settings->setDefault("hud_color_craft", "(22,24,30)");
 	settings->setDefault("hud_color_target", "(22,24,30)");
@@ -476,8 +521,32 @@ void set_default_settings()
 	// player actually picks a different color for it.
 	settings->setDefault("hud_preview_border_color", "(90,150,250)");
 
+	// Overall MineBoost GUI/menu accent color (MineBoost) -- distinct
+	// from the hud_color_* settings above (those only recolor individual
+	// in-game HUD element outlines). This one drives the interface
+	// chrome itself: the main settings window, the Colors panel, the
+	// bind-capture prompt, and the Photo HUD/HandView advanced-settings
+	// panels (see getMineBoostGuiColor() and its call sites in
+	// src/gui/custom_menu/Menu.cpp) -- nothing drawn over gameplay.
+	// Defaulted to the same blue ModernUI::PanelBorder already used so
+	// nothing changes visually until the player picks a different color
+	// for it via the "MineBoost GUI" entry in the Colors panel.
+	settings->setDefault("mineboost_gui_color", "(90,150,250)");
+
 	settings->setDefault("pos_data", "(0, 0)");
-	settings->setBool("use_custom_fog_color", "false");
+	// Was "settings->setBool("use_custom_fog_color", "false")" -- setBool()
+	// takes a real bool as its 2nd argument, not a string; passing the
+	// string literal "false" there silently converts through "non-null
+	// pointer -> true" (any non-null const char* is truthy), so this was
+	// actually defaulting CustomFog to ON for everyone, the opposite of
+	// every neighboring setDefault(..., "false") here. setBool() also
+	// isn't the right call at all in this function: it writes straight
+	// into whatever Settings layer `settings` is, which happens to BE the
+	// defaults layer here (see the Settings::createLayer(SL_DEFAULTS) at
+	// the top of this function) purely incidentally -- setDefault() is
+	// the function that's actually meant for this and asserts that
+	// (FATAL_ERROR_IF in Settings::setDefault(), src/settings.cpp).
+	settings->setDefault("use_custom_fog_color", "false");
 	settings->setDefault("custom_fog_color", "(0, 0, 0)");
 	settings->setDefault("use_custom_sky_color", "false");
 	settings->setDefault("custom_sky_color", "(0, 0, 0)");
@@ -487,6 +556,10 @@ void set_default_settings()
 	settings->setDefault("keys_y", "0");
 	settings->setDefault("music_hud_x", "-1");
 	settings->setDefault("music_hud_y", "10");
+	settings->setDefault("rp_hud_x", "-1");
+	settings->setDefault("rp_hud_y", "80");
+	settings->setDefault("consumption_hud_x", "-1");
+	settings->setDefault("consumption_hud_y", "110");
 	settings->setDefault("target_hud_x", "-1");
 	settings->setDefault("target_hud_y", "-1");
 	settings->setDefault("inventory_hud_x", "-1");
@@ -499,10 +572,28 @@ void set_default_settings()
 	// see textures/base/pack/) while a GUI is open. "photo_hud_image"
 	// selects which one; cycled via the settings menu (see Menu.cpp).
 	settings->setDefault("photo_hud", "false");
-	settings->setDefault("photo_hud_image", "face"); // "face", "cat_kuki" or "mellstroy"
+	settings->setDefault("photo_hud_image", "face"); // "face", "cat_kuki", "mellstroy", "pawn_black", "pawn_two_black", or "custom"
 	settings->setDefault("photo_hud_x", "-1");
 	settings->setDefault("photo_hud_y", "-1");
 	settings->setDefault("photo_hud_size", "200");
+	// Absolute filesystem path to a player-supplied image, used instead
+	// of the built-in photos (src/client/photohud.h's
+	// PhotoHudBuiltinImages table) when "photo_hud_image" is "custom" --
+	// set via the text field in the PhotoHUD advanced-settings panel
+	// (see PhotoHudSettingsMenu::applyCustomPath() in src/gui/
+	// custom_menu/PhotoHudSettingsMenu.cpp). Loaded straight off disk
+	// with IVideoDriver::getTexture() (same mechanism
+	// as the splash screen image in src/client/clientlauncher.cpp), not
+	// through the mod texture source, since it isn't a game/mod asset.
+	// Empty/invalid/unreadable falls back to "face" -- see
+	// PhotoHud::refreshFromSettings() in src/client/photohud.cpp.
+	settings->setDefault("photo_hud_custom_path", "");
+	// Off by default, matching Photo HUD's original "only while some
+	// GUI is open" behavior exactly (Hud::drawPhotoHud() drew behind
+	// formspecs specifically so it wouldn't clutter normal gameplay).
+	// On: shows during normal gameplay too, like every other MineBoost
+	// HUD element.
+	settings->setDefault("photo_hud_show_in_game", "false");
 	// Global size multiplier for MineBoost's custom-drawn HUD elements
 	// (coords/FPS/ping/KeyStroker/Music HUD/Target HUD/Photo HUD) --
 	// separate from the engine's own "hud_scaling", so it only affects
@@ -519,6 +610,8 @@ void set_default_settings()
 	settings->setDefault("keys_size", "1.0");
 	settings->setDefault("cps_size", "1.0");
 	settings->setDefault("music_hud_size", "1.0");
+	settings->setDefault("rp_hud_size", "1.0");
+	settings->setDefault("consumption_hud_size", "1.0");
 	settings->setDefault("target_hud_size", "1.0");
 	settings->setDefault("inventory_hud_size", "1.0");
 	settings->setDefault("craft_hud_size", "1.0");

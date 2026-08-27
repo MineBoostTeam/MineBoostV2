@@ -990,6 +990,16 @@ void Camera::drawFriendESP()
 
 void Camera::drawMineBoostBadges()
 {
+	// Skip the expensive "copy+walk every active object, dynamic_cast
+	// each one" work below entirely on the (very common -- most players,
+	// most sessions, most servers) frames where nobody's ever been seen
+	// as a MineBoost user at all: a single empty-map check replaces a
+	// full active-object-map copy plus a dynamic_cast<GenericCAO*> per
+	// object, every single frame, whenever there's nothing to show.
+	const unsigned long long now_ms = porting::getTimeMs();
+	if (!MineBoostPresence::get().hasAnyRecentUsers())
+		return;
+
 	// ITextureSource::getTexture() caches internally (and, unlike a raw
 	// pointer we'd cache ourselves here, gets invalidated correctly if
 	// the texture source/driver is ever recreated -- e.g. across a
@@ -1009,7 +1019,6 @@ void Camera::drawMineBoostBadges()
 	video::IVideoDriver *driver = RenderingEngine::get_video_driver();
 	v2u32 screensize = driver->getScreenSize();
 	gui::IGUIFont *font = g_fontengine->getFont();
-	const unsigned long long now_ms = porting::getTimeMs();
 
 	std::unordered_map<u16, ClientActiveObject*> objects;
 	m_client->getEnv().getAllActiveObjects(objects);

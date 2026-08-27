@@ -17,6 +17,7 @@
 #include "IGUIScrollBar.h"
 #include "Button.h"
 #include "Items.h"
+#include "PhotoHudSettingsMenu.h"
 #include "settings.h"
 
 using namespace irr;
@@ -129,6 +130,11 @@ public:
     void create();
 
     void close();
+    // Whether the settings menu is currently open -- used by the
+    // ClientChat keybind handler (Game::processKeyInput() in
+    // src/client/game.cpp) to make Menu and GUIClientChat mutually
+    // exclusive, so only one of them is ever actually live at a time.
+    bool isMenuOpen() const { return isOpen; }
 
     void initCategoryButtons();
 
@@ -160,6 +166,8 @@ public:
         settings.push_back({"ShowFPS", "show_fps", SettingCategory::GUI});
         settings.push_back({"ShowPing", "show_ping", SettingCategory::GUI});
         settings.push_back({"NowPlaying", "music_hud", SettingCategory::GUI});
+        settings.push_back({"ShowRP", "show_rp", SettingCategory::GUI});
+        settings.push_back({"ConsumptionHUD", "consumption_hud", SettingCategory::GUI});
         settings.push_back({"InventoryHUD", "inventory_hud", SettingCategory::GUI});
         settings.push_back({"CraftHUD", "craft_hud", SettingCategory::GUI});
         // settings.push_back({"ArmorHUD", "armor_hud", SettingCategory::GUI}); // ArmorHUD temporarily disabled
@@ -247,20 +255,19 @@ private:
     int bind_capture_slot = 1;
     void startBindCapture(const std::string &setting_name);
 
-    // "Photo HUD" picker panel: right-clicking the "Photo HUD" tile in the
-    // GUI category opens this -- lets you pick which of the 3 built-in
-    // photos (face/cat_kuki/mellstroy, see textures/base/pack/) is shown.
-    // See openPhotoSettings()/closePhotoSettings().
-    bool photo_settings_open = false;
-    Button photo_settings_close_button;
-    Button photo_pick_face_button;
-    Button photo_pick_cat_kuki_button;
-    Button photo_pick_mellstroy_button;
-    Button photo_pick_pawn_black_button;
-    Button photo_pick_pawn_two_black_button;
-    void openPhotoSettings();
-    void closePhotoSettings();
-    core::rect<s32> getPhotoSettingsPanelRect();
+    // "Photo HUD" advanced-settings panel: right-clicking the "PhotoHUD"
+    // tile in the GUI category opens this -- lets you pick which of the
+    // built-in photos (see src/client/photohud.h's PhotoHudBuiltinImages
+    // table) is shown, or a custom image from disk. Ground-up rewrite
+    // (see src/gui/custom_menu/PhotoHudSettingsMenu.h/.cpp) -- Menu just
+    // owns one instance and forwards open/close/events/draw to it (see
+    // the PhotoHUD tile's right-click handler and the "photo_panel.
+    // isOpen()"/"photo_panel.onEvent()"/"photo_panel.draw()" calls in
+    // Menu.cpp). See PhotoHudSettingsMenu.h for that class's own design
+    // notes, and src/client/photohud.h for the actual on-screen HUD
+    // element (a separate, independent class this panel has no
+    // reference to -- the two stay in sync purely through g_settings).
+    PhotoHudSettingsMenu photo_panel;
 
     // "Colors" panel: lets the player pick a color for each HUD element
     // via 3 RGB sliders shared across a list of targets on the left --
@@ -317,11 +324,5 @@ private:
     void closeHandViewSettings();
     core::rect<s32> getHandViewSettingsPanelRect();
 };
-
-// Returns the built-in texture filename (e.g. "face.png") for the
-// currently selected "photo_hud_image" setting value. Shared between
-// Menu.cpp (edit-mode preview / picker panel) and Hud::drawPhotoHud()
-// (src/client/hud.cpp) so both always agree on what "selected" means.
-std::string getSelectedPhotoHudTexture();
 
 #endif

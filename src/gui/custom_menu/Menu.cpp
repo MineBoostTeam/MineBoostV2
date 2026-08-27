@@ -9,23 +9,22 @@
 #include "client/texturesource.h"
 #include "hud.h"
 #include "util/string.h"
+#include "filesys.h"
+#include "log.h"
+#include "porting.h"
 #include "util/numeric.h"
 #include "client/keycode.h"
 #include "gui/custom_menu/ModernUI.h"
+#include <IGUIEditBox.h>
 
-std::string getSelectedPhotoHudTexture()
-{
-    std::string image = g_settings->get("photo_hud_image");
-    if (image == "cat_kuki")
-        return "cat_kuki.png";
-    if (image == "mellstroy")
-        return "mellstroy.png";
-    if (image == "pawn_black")
-        return "PawnWithBlackPeople.png";
-    if (image == "pawn_two_black")
-        return "PawnWithTwoBlackPeoples.png";
-    return "face.png"; // default/fallback
-}
+// The safeGetString()/safeGetBool() helpers that used to live here were
+// only used by the old PhotoHUD advanced-settings panel; PhotoHUD has
+// since been rewritten from the ground up as two fully independent
+// classes -- PhotoHudSettingsMenu (this panel, src/gui/custom_menu/
+// PhotoHudSettingsMenu.h/.cpp) and PhotoHud (the actual on-screen HUD
+// element, src/client/photohud.h/.cpp) -- each with their own local
+// copies of whatever small helpers they need, so the dead copies that
+// used to live here were removed.
 
 // ---- Per-function keybinds --------------------------------------------
 //
@@ -178,6 +177,11 @@ core::vector2d<s32> offset_cps;
 Sprite_ music_sprite = Sprite_();
 core::vector2d<s32> offset_music;
 
+Sprite_ rp_sprite = Sprite_();
+Sprite_ consumption_sprite = Sprite_();
+core::vector2d<s32> offset_rp;
+core::vector2d<s32> offset_consumption;
+
 Sprite_ target_hud_sprite = Sprite_();
 core::vector2d<s32> offset_target_hud;
 
@@ -209,6 +213,23 @@ core::vector2d<s32> offset_photo;
 static video::SColor getHudPreviewBorderColor()
 {
     v3f c = g_settings->getV3F("hud_preview_border_color").value_or(v3f(90, 150, 250));
+    return video::SColor(255,
+        rangelim((s32)myround(c.X), 0, 255),
+        rangelim((s32)myround(c.Y), 0, 255),
+        rangelim((s32)myround(c.Z), 0, 255));
+}
+
+// Overall MineBoost GUI/menu accent color -- see "mineboost_gui_color" in
+// src/defaultsettings.cpp and the "MineBoost GUI" entry in getColorTargets()
+// below. Recolors the interface chrome itself (main settings window, Colors
+// panel, bind-capture prompt, Photo HUD/HandView advanced-settings panels),
+// as opposed to the individual hud_color_* / hud_preview_border_color
+// settings, which only ever recolor in-game HUD elements. Falls back to
+// ModernUI::PanelBorder's blue if the setting is ever missing/malformed, same
+// as every other color getter here.
+static video::SColor getMineBoostGuiColor()
+{
+    v3f c = g_settings->getV3F("mineboost_gui_color").value_or(v3f(90, 150, 250));
     return video::SColor(255,
         rangelim((s32)myround(c.X), 0, 255),
         rangelim((s32)myround(c.Y), 0, 255),
@@ -549,14 +570,144 @@ static void drawMusicHudPreview(video::IVideoDriver *driver, gui::IGUIFont *font
     font->draw(wdur, dur_rect, video::SColor(255, 190, 190, 190), false, true);
 }
 
-// Photo HUD preview: shows whichever of the 3 built-in photos
-// (face/cat_kuki/mellstroy) is currently selected via "photo_hud_image",
-// scaled into the drag box -- same fit logic as Hud::drawPhotoHud() in
-// src/client/hud.cpp.
+// ShowRP preview: mirrors Hud::drawShowRp() (src/client/hud.cpp) exactly
+// -- same padding/art-size/text-column-width formula, and critically the
+// same FIXED 2-line layout (title + author always reserve their space,
+// regardless of whether the current texture pack's metadata actually has
+// them) -- that fixed layout is what keeps this box's size from ever
+// drifting out of sync with the real one, the same bug KeyStroker/
+// ShowCPS/Coords all had before their own size formulas were made
+// exact-match rather than approximate. Sample placeholder text/art, since
+// there's no live texture pack context to read here in the menu.
+static void drawConsumptionHudPreview(video::IVideoDriver *driver, gui::IGUIFont *font, Sprite_ &sprite)
+{
+    float size_mult = std::max(0.5f, std::min(2.5f, g_settings->getFloat("hud_size")))
+        * std::max(0.5f, std::min(2.5f, g_settings->getFloat("consumption_hud_size")));
+    gui::IGUIFont *scaled_font = g_fontengine->getFont(
+        (unsigned int)(g_fontengine->getDefaultFontSize() * size_mult));
+    if (scaled_font)
+        font = scaled_font;
+
+    if (!font) {
+        core::rect<s32> fallback = sprite.get_rect();
+        ModernUI::panel(driver, fallback, ModernUI::Radius, video::SColor(160, 20, 20, 20), getHudPreviewBorderColor(), /*shadow=*/false);
+        return;
+    }
+
+    // Matches Hud::drawConsumptionHud()'s formula (src/client/hud.cpp)
+    // exactly -- fixed sample text at max width (3 segments, all 3 digits)
+    // rather than live numbers, so this preview box is always the exact
+    // same size as the real panel regardless of current RAM/CPU/GPU
+    // usage.
+    const wchar_t *wtext = L"RAM: 9999 MB  CPU: 100%  GPU: 100%";
+    const s32 pad = (s32)(8 * size_mult);
+    const s32 line_h = font->getDimension(L"Ay").Height;
+    const s32 text_w = font->getDimension(wtext).Width;
+    const s32 box_w = text_w + pad * 2;
+    const s32 box_h = line_h + pad * 2;
+
+    // Keep the drag hit-box in sync with what's actually drawn.
+    sprite.width = box_w;
+    sprite.height = box_h;
+    core::rect<s32> box = sprite.get_rect();
+
+    ModernUI::panel(driver, box, ModernUI::Radius, video::SColor(160, 20, 20, 20), getHudPreviewBorderColor(), /*shadow=*/false);
+
+    core::rect<s32> text_rect(box.UpperLeftCorner.X + pad, box.UpperLeftCorner.Y + pad,
+        box.LowerRightCorner.X - pad, box.LowerRightCorner.Y - pad);
+    font->draw(wtext, text_rect, video::SColor(255, 220, 220, 220));
+}
+
+
+static void drawShowRpPreview(video::IVideoDriver *driver, gui::IGUIFont *font, Sprite_ &sprite)
+{
+    float size_mult = std::max(0.5f, std::min(2.5f, g_settings->getFloat("hud_size")))
+        * std::max(0.5f, std::min(2.5f, g_settings->getFloat("rp_hud_size")));
+    gui::IGUIFont *scaled_font = g_fontengine->getFont(
+        (unsigned int)(g_fontengine->getDefaultFontSize() * size_mult));
+    if (scaled_font)
+        font = scaled_font;
+
+    if (!font) {
+        core::rect<s32> fallback = sprite.get_rect();
+        ModernUI::panel(driver, fallback, ModernUI::Radius, video::SColor(160, 20, 20, 20), getHudPreviewBorderColor(), /*shadow=*/false);
+        return;
+    }
+
+    const wchar_t *wline1 = L"MyTexturePack";
+    const wchar_t *wline2 = L"by PackAuthor";
+
+    const s32 pad = (s32)(8 * size_mult);
+    const s32 line_h = font->getDimension(L"Ag").Height;
+    // Matches Hud::drawShowRp()'s formula (src/client/hud.cpp) exactly --
+    // 2 lines, no reserved progress-bar space (there's nothing to show
+    // progress of here, unlike NowPlaying) -- so this preview box is
+    // always the exact same size as the real panel.
+    const int num_text_lines = 2;
+
+    const s32 art_size = std::max<s32>(num_text_lines * line_h, 32);
+    const s32 art_gap = pad;
+
+    const s32 content_h = std::max(art_size, num_text_lines * line_h);
+    const s32 text_area_w = line_h * 9;
+    const s32 box_w = art_size + art_gap + text_area_w + pad * 2;
+    const s32 box_h = pad + content_h + pad;
+
+    // Keep the drag hit-box in sync with what's actually drawn.
+    sprite.width = box_w;
+    sprite.height = box_h;
+    core::rect<s32> box = sprite.get_rect();
+
+    ModernUI::panel(driver, box, ModernUI::Radius, video::SColor(160, 20, 20, 20), getHudPreviewBorderColor(), /*shadow=*/false);
+
+    const video::SColor title_color(255, 220, 220, 220);
+    const video::SColor author_color(255, 170, 170, 170);
+
+    s32 content_x = box.UpperLeftCorner.X + pad;
+
+    // Placeholder screenshot square -- same reasoning as MusicHud's
+    // placeholder album art above.
+    core::rect<s32> art_rect(content_x, box.UpperLeftCorner.Y + pad,
+        content_x + art_size, box.UpperLeftCorner.Y + pad + art_size);
+    ModernUI::panel(driver, art_rect, ModernUI::Radius, video::SColor(200, 70, 70, 90), video::SColor(160, 140, 140, 160), /*shadow=*/false);
+    content_x += art_size + art_gap;
+
+    s32 y = box.UpperLeftCorner.Y + pad;
+    s32 text_right = box.LowerRightCorner.X - pad;
+
+    core::rect<s32> rect1(content_x, y, text_right, y + line_h);
+    font->draw(wline1, rect1, title_color, false, true);
+    y += line_h;
+
+    core::rect<s32> rect2(content_x, y, text_right, y + line_h);
+    font->draw(wline2, rect2, author_color, false, true);
+}
+
+// Photo HUD preview: shows whichever built-in photo is currently
+// selected via "photo_hud_image" (see src/client/photohud.h's
+// PhotoHudBuiltinImages table -- same table PhotoHudSettingsMenu's own
+// picker buttons are built from), scaled into the drag box -- same fit
+// logic as PhotoHud::draw() in src/client/photohud.cpp. Doesn't attempt
+// to preview a custom image (unlike the real HUD element/the settings
+// panel's own preview) -- this is just a quick drag-positioning aid, and
+// keeping it to a cheap table lookup (no filesystem access) keeps it
+// that way.
 static void drawPhotoHudPreview(video::IVideoDriver *driver, gui::IGUIFont *font,
         Sprite_ &sprite, ITextureSource *tsrc, s32 screenW, s32 screenH)
 {
-    video::ITexture *tex = tsrc ? tsrc->getTexture(getSelectedPhotoHudTexture()) : nullptr;
+    video::ITexture *tex = nullptr;
+    if (tsrc) {
+        std::string selected = g_settings->exists("photo_hud_image") ?
+            g_settings->get("photo_hud_image") : "face";
+        const char *texture_filename = PhotoHudBuiltinImages.front().texture_filename;
+        for (const auto &img : PhotoHudBuiltinImages) {
+            if (selected == img.settings_key) {
+                texture_filename = img.texture_filename;
+                break;
+            }
+        }
+        tex = tsrc->getTexture(texture_filename);
+    }
 
     if (tex) {
         core::dimension2du imgsize = tex->getOriginalSize();
@@ -664,7 +815,7 @@ void drawBackground(video::IVideoDriver* driver, s32 screenW, s32 screenH) {
     core::rect<s32> winRect(x, y, x + WIDTH_, y + HEIGHT_);
 
     ModernUI::panel(driver, winRect, ModernUI::Radius,
-            video::SColor(200, 22, 24, 30), ModernUI::PanelBorder,
+            video::SColor(200, 22, 24, 30), getMineBoostGuiColor(),
             /*shadow=*/true, /*borderThickness=*/2);
 
     s32 lineOffsetX = 190;
@@ -831,28 +982,11 @@ Menu::Menu(gui::IGUIEnvironment* env,
     hud_size_scrollbar->setPos((s32)(g_settings->getFloat("hud_size") * 100));
     hud_size_scrollbar->setVisible(false);
 
-    // "Photo HUD" picker panel -- right-clicking the Photo HUD tile opens
-    // a small image picker over the main settings list (see
-    // openPhotoSettings()/closePhotoSettings() and the
-    // photo_settings_open handling in OnEvent()/draw()).
-    photo_settings_close_button.addButton(core::rect<s32>(0, 0, 10, 10), L"Close");
-    photo_settings_close_button.setColor(video::SColor(180, 20, 20, 20));
-    photo_settings_close_button.setOnClick([this]() { closePhotoSettings(); });
-
-    photo_pick_face_button.addButton(core::rect<s32>(0, 0, 10, 10), L"Face");
-    photo_pick_face_button.setOnClick([this]() { g_settings->set("photo_hud_image", "face"); });
-
-    photo_pick_cat_kuki_button.addButton(core::rect<s32>(0, 0, 10, 10), L"Cat Kuki");
-    photo_pick_cat_kuki_button.setOnClick([this]() { g_settings->set("photo_hud_image", "cat_kuki"); });
-
-    photo_pick_mellstroy_button.addButton(core::rect<s32>(0, 0, 10, 10), L"Mellstroy");
-    photo_pick_mellstroy_button.setOnClick([this]() { g_settings->set("photo_hud_image", "mellstroy"); });
-
-    photo_pick_pawn_black_button.addButton(core::rect<s32>(0, 0, 10, 10), L"Pawn+1");
-    photo_pick_pawn_black_button.setOnClick([this]() { g_settings->set("photo_hud_image", "pawn_black"); });
-
-    photo_pick_pawn_two_black_button.addButton(core::rect<s32>(0, 0, 10, 10), L"Pawn+2");
-    photo_pick_pawn_two_black_button.setOnClick([this]() { g_settings->set("photo_hud_image", "pawn_two_black"); });
+    // "Photo HUD" advanced-settings panel -- right-clicking the PhotoHUD
+    // tile opens a small image picker over the main settings list (see
+    // PhotoHudSettingsMenu.h/.cpp, and the "photo_panel.isOpen()"/
+    // "photo_panel.onEvent()"/"photo_panel.draw()" calls in this file).
+    photo_panel.init(env, this, client);
 
     // "HandView" picker panel -- right-clicking the HandView tile opens a
     // swing-style picker plus 3 embedded offset/scale sliders (see
@@ -1050,6 +1184,26 @@ Menu::Menu(gui::IGUIEnvironment* env,
     music_sprite.y = g_settings->getS32("music_hud_y");
     if (music_sprite.x < 0) {
         music_sprite.x = Environment->getVideoDriver()->getScreenSize().Width - music_sprite.width - 10;
+    }
+
+    rp_sprite.width = 220;
+    rp_sprite.height = 50;
+    rp_sprite.x = g_settings->getS32("rp_hud_x");
+    rp_sprite.y = g_settings->getS32("rp_hud_y");
+    if (rp_sprite.x < 0) {
+        rp_sprite.x = Environment->getVideoDriver()->getScreenSize().Width - rp_sprite.width - 10;
+    }
+
+    // Width is a rough estimate here -- drawConsumptionHudPreview() below
+    // recomputes it every frame from the actual fixed sample text and
+    // font size, same "keep the drag hit-box in sync with what's really
+    // drawn" pattern as the Coords/PhotoHUD previews use.
+    consumption_sprite.width = 320;
+    consumption_sprite.height = 40;
+    consumption_sprite.x = g_settings->getS32("consumption_hud_x");
+    consumption_sprite.y = g_settings->getS32("consumption_hud_y");
+    if (consumption_sprite.x < 0) {
+        consumption_sprite.x = 10;
     }
 
     target_hud_sprite.width = (s32)(160 * g_settings->getFloat("target_hud_size"));
@@ -1279,7 +1433,7 @@ void Menu::create()
         target_particle_scrollbar->setVisible(true);
         hud_size_scrollbar->setVisible(true);
     }
-    closePhotoSettings();
+    photo_panel.close();
     closeHandViewSettings();
     closeColorsPanel();
 }
@@ -1317,21 +1471,15 @@ void Menu::close()
     hitparticle_scrollbar->setVisible(false);
     target_particle_scrollbar->setVisible(false);
     hud_size_scrollbar->setVisible(false);
-    closePhotoSettings();
+    photo_panel.close();
     closeHandViewSettings();
     closeColorsPanel();
 }
 
-core::rect<s32> Menu::getPhotoSettingsPanelRect()
-{
-    // Matches the 600x400 centered panel drawn by Items::drawSetting().
-    s32 sw = Environment->getVideoDriver()->getScreenSize().Width;
-    s32 sh = Environment->getVideoDriver()->getScreenSize().Height;
-    s32 rectWidth = 600, rectHeight = 400;
-    s32 posX = (sw - rectWidth) / 2;
-    s32 posY = (sh - rectHeight) / 2;
-    return core::rect<s32>(posX, posY, posX + rectWidth, posY + rectHeight);
-}
+// getPhotoSettingsPanelRect() removed -- see PhotoHudSettingsMenu::getPanelRect()
+// (src/gui/custom_menu/PhotoHudSettingsMenu.cpp), which Menu::
+// getHandViewSettingsPanelRect() below now calls directly so the two
+// panels keep sharing the exact same footprint.
 
 // Middle-click on a settings tile calls this. Cycles: first click fills
 // slot 1, second fills slot 2, a third click (both already full) clears
@@ -1353,69 +1501,34 @@ void Menu::startBindCapture(const std::string &setting_name)
     bind_capture_slot = s1.empty() ? 1 : 2;
 }
 
-void Menu::openPhotoSettings()
-{
-    photo_settings_open = true;
-
-    core::rect<s32> panel = getPhotoSettingsPanelRect();
-
-    const s32 btn_w = 160, btn_h = 32, gap = 15;
-    s32 row_y = panel.UpperLeftCorner.Y + 80;
-
-    core::rect<s32> face_rect(panel.UpperLeftCorner.X + 20, row_y,
-        panel.UpperLeftCorner.X + 20 + btn_w, row_y + btn_h);
-    photo_pick_face_button.addButton(face_rect, L"Face");
-    photo_pick_face_button.setVisible(true);
-
-    core::rect<s32> cat_kuki_rect(face_rect.LowerRightCorner.X + gap, row_y,
-        face_rect.LowerRightCorner.X + gap + btn_w, row_y + btn_h);
-    photo_pick_cat_kuki_button.addButton(cat_kuki_rect, L"Cat Kuki");
-    photo_pick_cat_kuki_button.setVisible(true);
-
-    core::rect<s32> mellstroy_rect(cat_kuki_rect.LowerRightCorner.X + gap, row_y,
-        cat_kuki_rect.LowerRightCorner.X + gap + btn_w, row_y + btn_h);
-    photo_pick_mellstroy_button.addButton(mellstroy_rect, L"Mellstroy");
-    photo_pick_mellstroy_button.setVisible(true);
-
-    s32 row2_y = row_y + btn_h + gap;
-    core::rect<s32> pawn_black_rect(panel.UpperLeftCorner.X + 20, row2_y,
-        panel.UpperLeftCorner.X + 20 + btn_w, row2_y + btn_h);
-    photo_pick_pawn_black_button.addButton(pawn_black_rect, L"Pawn+1");
-    photo_pick_pawn_black_button.setVisible(true);
-
-    core::rect<s32> pawn_two_black_rect(pawn_black_rect.LowerRightCorner.X + gap, row2_y,
-        pawn_black_rect.LowerRightCorner.X + gap + btn_w, row2_y + btn_h);
-    photo_pick_pawn_two_black_button.addButton(pawn_two_black_rect, L"Pawn+2");
-    photo_pick_pawn_two_black_button.setVisible(true);
-
-    core::rect<s32> close_rect(panel.LowerRightCorner.X - 90, panel.UpperLeftCorner.Y + 10,
-        panel.LowerRightCorner.X - 10, panel.UpperLeftCorner.Y + 40);
-    photo_settings_close_button.addButton(close_rect, L"Close");
-    photo_settings_close_button.setVisible(true);
-}
-
-void Menu::closePhotoSettings()
-{
-    photo_settings_close_button.setVisible(false);
-    photo_pick_face_button.setVisible(false);
-    photo_pick_cat_kuki_button.setVisible(false);
-    photo_pick_mellstroy_button.setVisible(false);
-    photo_pick_pawn_black_button.setVisible(false);
-    photo_pick_pawn_two_black_button.setVisible(false);
-    photo_settings_open = false;
-    Environment->setFocus(this);
-}
+// openPhotoSettings()/closePhotoSettings()/applyPhotoCustomPath() removed
+// -- replaced by PhotoHudSettingsMenu::open()/close()/applyCustomPath() (see
+// src/gui/custom_menu/PhotoHudSettingsMenu.cpp), called via the `photo_panel`
+// member below.
 
 core::rect<s32> Menu::getHandViewSettingsPanelRect()
 {
-    // Same fixed 600x400 centered panel every advanced-settings tile
+    // Same fixed 600x480 centered panel every advanced-settings tile
     // uses (see Items::drawSetting()) -- keeps the generic background
     // it draws lined up with whatever buttons/sliders we place on it.
-    return getPhotoSettingsPanelRect();
+    // Deliberately shares PhotoHudSettingsMenu's own rect (rather than each
+    // panel computing its own identical copy) so the two stay in sync
+    // automatically if that size is ever tuned again.
+    return photo_panel.getPanelRect();
 }
 
 void Menu::openHandViewSettings()
 {
+    // Mutually exclusive with the PhotoHUD panel -- see the matching
+    // photo_panel.close() call at the PhotoHUD tile's right-click handler
+    // below, and the note on this in Button::isPressed() (src/gui/
+    // custom_menu/Button.cpp): both panels share the exact same screen
+    // rect (getHandViewSettingsPanelRect() returns photo_panel.
+    // getPanelRect()), so having both "open" at once would mean two full
+    // sets of buttons/sliders sitting on top of each other, both
+    // receiving clicks in that shared area.
+    photo_panel.close();
+
     handview_settings_open = true;
 
     core::rect<s32> panel = getHandViewSettingsPanelRect();
@@ -1504,10 +1617,13 @@ void Menu::closeHandViewSettings()
 std::vector<Menu::ColorTarget> Menu::getColorTargets()
 {
     return {
+        {L"MineBoost GUI", "mineboost_gui_color",  false, ""},
         {L"Coords",       "hud_color_coords",     false, ""},
         {L"FPS",          "hud_color_fps",         false, ""},
         {L"Ping",         "hud_color_ping",        false, ""},
         {L"NowPlaying",   "hud_color_music",       false, ""},
+        {L"ShowRP",       "hud_color_rp",          false, ""},
+        {L"ConsumptionHUD", "hud_color_consumption", false, ""},
         {L"InventoryHUD", "hud_color_inventory",   false, ""},
         {L"CraftHUD",     "hud_color_craft",       false, ""},
         {L"TargetHUD",    "hud_color_target",      false, ""},
@@ -1526,7 +1642,11 @@ core::rect<s32> Menu::getColorsPanelRect()
     // to that size.
     s32 sw = Environment->getVideoDriver()->getScreenSize().Width;
     s32 sh = Environment->getVideoDriver()->getScreenSize().Height;
-    s32 rectWidth = 700, rectHeight = 480;
+    // Height bumped from 480 to fit the "MineBoost GUI" entry added to
+    // getColorTargets() (14 rows now instead of 13, each 28px + 4px gap
+    // starting 50px down from the top) without the target-button list
+    // spilling past the panel's bottom edge.
+    s32 rectWidth = 700, rectHeight = 520;
     s32 posX = (sw - rectWidth) / 2;
     s32 posY = (sh - rectHeight) / 2;
     return core::rect<s32>(posX, posY, posX + rectWidth, posY + rectHeight);
@@ -1758,33 +1878,13 @@ bool Menu::OnEvent(const irr::SEvent& event)
             return true;
         }
     }
-
-    if (photo_settings_open) {
-        if (photo_settings_close_button.isPressed(event))
-            return true;
-
-        if (photo_pick_face_button.isPressed(event))
-            return true;
-
-        if (photo_pick_cat_kuki_button.isPressed(event))
-            return true;
-
-        if (photo_pick_mellstroy_button.isPressed(event))
-            return true;
-
-        if (photo_pick_pawn_black_button.isPressed(event))
-            return true;
-
-        if (photo_pick_pawn_two_black_button.isPressed(event))
-            return true;
-
-        if (event.EventType == irr::EET_MOUSE_INPUT_EVENT &&
-                event.MouseInput.Event == irr::EMIE_LMOUSE_PRESSED_DOWN &&
-                !getPhotoSettingsPanelRect().isPointInside(
-                    core::vector2d<s32>(event.MouseInput.X, event.MouseInput.Y))) {
-            closePhotoSettings();
-        }
-
+    if (photo_panel.isOpen()) {
+        // The panel handles its own buttons/edit box/click-outside-to-
+        // close entirely internally now -- see PhotoHudSettingsMenu::onEvent()
+        // (src/gui/custom_menu/PhotoHudSettingsMenu.cpp). Same convention as
+        // before: every event is considered consumed while the panel is
+        // open, so nothing leaks through to whatever's behind it.
+        photo_panel.onEvent(event);
         return true;
     }
 
@@ -1960,6 +2060,18 @@ bool Menu::OnEvent(const irr::SEvent& event)
                         return true;
                     }
 
+                    if (rp_sprite.get_rect().isPointInside(core::vector2d<s32>(event.MouseInput.X, event.MouseInput.Y))) {
+                        rp_sprite.isDragging = true;
+                        offset_rp = core::vector2d<s32>(event.MouseInput.X - rp_sprite.x, event.MouseInput.Y - rp_sprite.y);
+                        return true;
+                    }
+
+                    if (consumption_sprite.get_rect().isPointInside(core::vector2d<s32>(event.MouseInput.X, event.MouseInput.Y))) {
+                        consumption_sprite.isDragging = true;
+                        offset_consumption = core::vector2d<s32>(event.MouseInput.X - consumption_sprite.x, event.MouseInput.Y - consumption_sprite.y);
+                        return true;
+                    }
+
                     if (target_hud_sprite.get_rect().isPointInside(core::vector2d<s32>(event.MouseInput.X, event.MouseInput.Y))) {
                         target_hud_sprite.isDragging = true;
                         offset_target_hud = core::vector2d<s32>(event.MouseInput.X - target_hud_sprite.x, event.MouseInput.Y - target_hud_sprite.y);
@@ -2000,6 +2112,8 @@ bool Menu::OnEvent(const irr::SEvent& event)
                     keystr.isDragging = false;
                     cps_sprite.isDragging = false;
                     music_sprite.isDragging = false;
+                    rp_sprite.isDragging = false;
+                    consumption_sprite.isDragging = false;
                     target_hud_sprite.isDragging = false;
                     inventory_hud_sprite.isDragging = false;
                     craft_hud_sprite.isDragging = false;
@@ -2060,6 +2174,18 @@ bool Menu::OnEvent(const irr::SEvent& event)
                         music_sprite.x = snap(event.MouseInput.X - offset_music.X);
                         music_sprite.y = snap(event.MouseInput.Y - offset_music.Y);
                         music_sprite.save(screenWidth, screenHeight, "music_hud_x", "music_hud_y");
+                    }
+
+                    if (rp_sprite.isDragging) {
+                        rp_sprite.x = snap(event.MouseInput.X - offset_rp.X);
+                        rp_sprite.y = snap(event.MouseInput.Y - offset_rp.Y);
+                        rp_sprite.save(screenWidth, screenHeight, "rp_hud_x", "rp_hud_y");
+                    }
+
+                    if (consumption_sprite.isDragging) {
+                        consumption_sprite.x = snap(event.MouseInput.X - offset_consumption.X);
+                        consumption_sprite.y = snap(event.MouseInput.Y - offset_consumption.Y);
+                        consumption_sprite.save(screenWidth, screenHeight, "consumption_hud_x", "consumption_hud_y");
                     }
 
                     if (target_hud_sprite.isDragging) {
@@ -2153,6 +2279,10 @@ bool Menu::OnEvent(const irr::SEvent& event)
 
                     if (bump_setting(music_sprite, "music_hud_size"))
                         return true;
+                    if (bump_setting(rp_sprite, "rp_hud_size"))
+                        return true;
+                    if (bump_setting(consumption_sprite, "consumption_hud_size"))
+                        return true;
                     if (bump_setting(inventory_hud_sprite, "inventory_hud_size"))
                         return true;
                     if (bump_setting(craft_hud_sprite, "craft_hud_size"))
@@ -2191,21 +2321,25 @@ bool Menu::OnEvent(const irr::SEvent& event)
             buttons[i].isPressed(event);
         }
 
-        // The "`" key (KEY_OEM_3, right above Tab) clears whatever bind
-        // is on the tile currently under the cursor -- moved off RMB,
-        // which used to double-book as both "clear bind" on most tiles
-        // and "open advanced settings" on PhotoHUD/HandView specifically
-        // (that ambiguity is also why those two tiles' "RMB: settings"
-        // hint and bind label used to visually collide -- see
-        // getBindDisplayString() above). Uses last_mouse_pos (tracked
-        // from real mouse events at the top of OnEvent(), the same
-        // coordinate space item rects live in) rather than querying the
-        // raw device cursor control directly -- that can disagree with
-        // GUI-space coordinates under DPI/hud scaling, which silently
-        // made every hit-test here miss regardless of where the cursor
-        // actually was.
-        if (event.EventType == irr::EET_KEY_INPUT_EVENT &&
-                event.KeyInput.PressedDown && event.KeyInput.Key == irr::KEY_OEM_3) {
+        // Shift+RMB clears whatever bind is on the tile currently under the
+        // cursor. Previously this was the "`" key (KEY_OEM_3, right above
+        // Tab) -- moved to Shift+RMB so it lives on the same button players
+        // already reach for to interact with a tile, instead of a separate
+        // key across the keyboard (and so it works the same way on
+        // touch/Android, where there's no "`" key at all). Checked *before*
+        // the plain-RMB handler below (which opens PhotoHUD/HandView's
+        // advanced settings), and that handler explicitly requires Shift to
+        // be *not* held, so Shift+RMB can never fall through and also
+        // toggle those settings panels open/closed. Uses last_mouse_pos
+        // (tracked from real mouse events at the top of OnEvent(), the same
+        // coordinate space item rects live in) rather than querying the raw
+        // device cursor control directly -- that can disagree with
+        // GUI-space coordinates under DPI/hud scaling, which silently made
+        // every hit-test here miss regardless of where the cursor actually
+        // was.
+        if (event.EventType == irr::EET_MOUSE_INPUT_EVENT &&
+                event.MouseInput.Event == irr::EMIE_RMOUSE_PRESSED_DOWN &&
+                event.MouseInput.Shift) {
             for (size_t i = 0; i < items.size(); i++) {
                 const std::string &setting_item = items[i].get_setting_item();
                 if (!items[i].get_rect().isPointInside(last_mouse_pos))
@@ -2219,19 +2353,26 @@ bool Menu::OnEvent(const irr::SEvent& event)
             }
         }
 
-        // Right-click PhotoHUD/HandView to open their advanced settings.
-        // Every other tile ignores RMB now (bind-clearing moved to the
-        // "`" key above).
+        // Right-click (without Shift) PhotoHUD/HandView to open their
+        // advanced settings. Every other tile ignores plain RMB now
+        // (bind-clearing moved to Shift+RMB above) -- the explicit
+        // "!event.MouseInput.Shift" check is what keeps Shift+RMB on these
+        // two tiles from also toggling their settings panels open/closed.
         if (event.EventType == irr::EET_MOUSE_INPUT_EVENT &&
-                event.MouseInput.Event == irr::EMIE_RMOUSE_PRESSED_DOWN) {
+                event.MouseInput.Event == irr::EMIE_RMOUSE_PRESSED_DOWN &&
+                !event.MouseInput.Shift) {
             for (size_t i = 0; i < items.size(); i++) {
                 if (items[i].get_setting_item() == "photo_hud" &&
                         items[i].get_rect().isPointInside(
                             core::vector2d<s32>(event.MouseInput.X, event.MouseInput.Y))) {
-                    if (photo_settings_open)
-                        closePhotoSettings();
-                    else
-                        openPhotoSettings();
+                    if (photo_panel.isOpen())
+                        photo_panel.close();
+                    else {
+                        // Mutually exclusive with HandView -- see the
+                        // comment on this in Menu::openHandViewSettings().
+                        closeHandViewSettings();
+                        photo_panel.open();
+                    }
                     return true;
                 }
                 if (items[i].get_setting_item() == "handview_enabled" &&
@@ -2353,6 +2494,9 @@ void Menu::draw()
 
         drawMusicHudPreview(driver, font, music_sprite);
 
+        drawShowRpPreview(driver, font, rp_sprite);
+        drawConsumptionHudPreview(driver, font, consumption_sprite);
+
         drawHudPreviewBox(driver, font, core::rect<s32>(target_hud_sprite.get_rect()),
             L"PlayerName", L"HP: 20/20");
 
@@ -2378,7 +2522,7 @@ void Menu::draw()
         if (font) {
             s32 px = (screenW - WIDTH_) / 2;
             s32 py = (screenH - HEIGHT_) / 2;
-            std::wstring legend = L"MMB: set bind    `: clear bind";
+            std::wstring legend = L"MMB: set bind    Shift+RMB: clear bind";
             core::dimension2du lsz = font->getDimension(legend.c_str());
             s32 lx = px + WIDTH_ - (s32)lsz.Width - 16;
             s32 ly = py + 10;
@@ -2425,80 +2569,20 @@ void Menu::draw()
             s32 cx = (screenW - (s32)sz.Width) / 2;
             s32 cy = screenH - (s32)sz.Height - 40;
             core::rect<s32> bg(cx - 10, cy - 6, cx + (s32)sz.Width + 10, cy + (s32)sz.Height + 6);
-            ModernUI::panel(driver, bg, ModernUI::Radius, video::SColor(220, 20, 20, 20), ModernUI::PanelBorder);
+            ModernUI::panel(driver, bg, ModernUI::Radius, video::SColor(220, 20, 20, 20), getMineBoostGuiColor());
             font->draw(wcap.c_str(), core::rect<s32>(cx, cy, cx + (s32)sz.Width, cy + (s32)sz.Height),
                 video::SColor(255, 255, 255, 0));
         }
-
-        if (photo_settings_open) {
-            core::rect<s32> panel = getPhotoSettingsPanelRect();
-            ModernUI::panel(driver, panel, ModernUI::Radius, video::SColor(230, 20, 20, 20), ModernUI::PanelBorder);
-
-            std::string selected = g_settings->get("photo_hud_image");
-            photo_pick_face_button.setColor(selected == "face" ?
-                video::SColor(255, 0, 130, 0) : video::SColor(180, 20, 20, 20));
-            photo_pick_cat_kuki_button.setColor(selected == "cat_kuki" ?
-                video::SColor(255, 0, 130, 0) : video::SColor(180, 20, 20, 20));
-            photo_pick_mellstroy_button.setColor(selected == "mellstroy" ?
-                video::SColor(255, 0, 130, 0) : video::SColor(180, 20, 20, 20));
-            photo_pick_pawn_black_button.setColor(selected == "pawn_black" ?
-                video::SColor(255, 0, 130, 0) : video::SColor(180, 20, 20, 20));
-            photo_pick_pawn_two_black_button.setColor(selected == "pawn_two_black" ?
-                video::SColor(255, 0, 130, 0) : video::SColor(180, 20, 20, 20));
-
-            if (font) {
-                const wchar_t *title = L"PhotoHUD settings";
-                font->draw(title, core::rect<s32>(panel.UpperLeftCorner.X + 20, panel.UpperLeftCorner.Y + 15,
-                    panel.LowerRightCorner.X - 100, panel.UpperLeftCorner.Y + 40),
-                    video::SColor(255, 255, 255, 255));
-
-                const wchar_t *label = L"Which photo should be shown?";
-                font->draw(label, core::rect<s32>(panel.UpperLeftCorner.X + 20, panel.UpperLeftCorner.Y + 50,
-                    panel.LowerRightCorner.X - 20, panel.UpperLeftCorner.Y + 70),
-                    video::SColor(255, 220, 220, 220));
-
-                // Pushed down below the two picker rows (was hardcoded
-                // right after a single row; a second row of buttons now
-                // sits where these hints used to start).
-                const wchar_t *hint1 = L"Only shown while a GUI (inventory, chest, menu...) is open.";
-                font->draw(hint1, core::rect<s32>(panel.UpperLeftCorner.X + 20, panel.UpperLeftCorner.Y + 180,
-                    panel.LowerRightCorner.X - 20, panel.UpperLeftCorner.Y + 200),
-                    video::SColor(200, 190, 190, 190));
-
-                const wchar_t *hint2 = L"Drag it around via Move HUD; resize it with the HUD Size slider.";
-                font->draw(hint2, core::rect<s32>(panel.UpperLeftCorner.X + 20, panel.UpperLeftCorner.Y + 200,
-                    panel.LowerRightCorner.X - 20, panel.UpperLeftCorner.Y + 220),
-                    video::SColor(200, 190, 190, 190));
-            }
-
-            // Live preview of the currently selected photo.
-            video::ITexture *tex = m_client ? m_client->getTextureSource()->getTexture(getSelectedPhotoHudTexture()) : nullptr;
-            if (tex) {
-                core::dimension2du imgsize = tex->getOriginalSize();
-                if (imgsize.Width > 0 && imgsize.Height > 0) {
-                    s32 max_dim = 130;
-                    float scale = std::min((float)max_dim / imgsize.Width, (float)max_dim / imgsize.Height);
-                    s32 w = std::max<s32>(1, (s32)(imgsize.Width * scale));
-                    s32 h = std::max<s32>(1, (s32)(imgsize.Height * scale));
-                    s32 cx = panel.UpperLeftCorner.X + (panel.getWidth() - w) / 2;
-                    s32 cy = panel.UpperLeftCorner.Y + 240;
-                    core::rect<s32> dest(cx, cy, cx + w, cy + h);
-                    core::rect<s32> src(0, 0, imgsize.Width, imgsize.Height);
-                    driver->draw2DImage(tex, dest, src, nullptr, nullptr, true);
-                }
-            }
-
-            photo_pick_face_button.draw(driver);
-            photo_pick_cat_kuki_button.draw(driver);
-            photo_pick_mellstroy_button.draw(driver);
-            photo_pick_pawn_black_button.draw(driver);
-            photo_pick_pawn_two_black_button.draw(driver);
-            photo_settings_close_button.draw(driver);
+        if (photo_panel.isOpen()) {
+            // Fully self-contained now -- see PhotoHudSettingsMenu::draw()
+            // (src/gui/custom_menu/PhotoHudSettingsMenu.cpp) for the panel's own
+            // background/labels/preview/buttons.
+            photo_panel.draw(driver, font);
         }
 
         if (handview_settings_open) {
             core::rect<s32> panel = getHandViewSettingsPanelRect();
-            ModernUI::panel(driver, panel, ModernUI::Radius, video::SColor(230, 20, 20, 20), ModernUI::PanelBorder);
+            ModernUI::panel(driver, panel, ModernUI::Radius, video::SColor(230, 20, 20, 20), getMineBoostGuiColor());
 
             std::string style = g_settings->get("hand_anim_style");
             Button *style_buttons[] = {&handview_pick_vanilla_button, &handview_pick_static_button,
@@ -2574,7 +2658,7 @@ void Menu::draw()
 
         if (colors_panel_open) {
             core::rect<s32> panel = getColorsPanelRect();
-            ModernUI::panel(driver, panel, ModernUI::Radius, video::SColor(230, 20, 20, 20), ModernUI::PanelBorder);
+            ModernUI::panel(driver, panel, ModernUI::Radius, video::SColor(230, 20, 20, 20), getMineBoostGuiColor());
 
             std::vector<ColorTarget> targets = getColorTargets();
 
@@ -2688,8 +2772,8 @@ void Menu::draw()
         hitparticle_scrollbar->setVisible(false);
         target_particle_scrollbar->setVisible(false);
         hud_size_scrollbar->setVisible(false);
-        if (photo_settings_open)
-            closePhotoSettings();
+        if (photo_panel.isOpen())
+            photo_panel.close();
         if (handview_settings_open)
             closeHandViewSettings();
     }

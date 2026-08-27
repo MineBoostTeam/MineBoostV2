@@ -8,7 +8,11 @@
 #include "inputhandler.h"
 #include "gui/mainmenumanager.h"
 #include "gui/touchcontrols.h"
-#include "gui/custom_menu/Menu.h"
+#include "gui/custom_menu/ImGuiMineBoostMenu.h"
+// MineBoost: ClientChat temporarily disabled -- see the matching #if 0
+// block below and the comment in src/client/game.cpp.
+// #include "gui/guiClientChat.h"
+#include "gui/ImGuiManager.h"
 #include "hud.h"
 #include "log_internal.h"
 #include "client/renderingengine.h"
@@ -72,6 +76,7 @@ void KeyCache::populate()
 	key[KeyType::QUICKTUNE_DEC] = getKeySetting("keymap_quicktune_dec");
 	key[KeyType::SPRITES] = getKeySetting("keymap_sprite_manager");
 	key[KeyType::MENU] = getKeySetting("keymap_menu");
+	key[KeyType::CLIENTCHAT] = getKeySetting("keymap_clientchat");
 	key[KeyType::MACRO_WHEEL] = getKeySetting("keymap_macro_wheel");
 
 	for (int i = 0; i < HUD_HOTBAR_ITEMCOUNT_MAX; i++) {
@@ -91,25 +96,67 @@ void KeyCache::populate()
 
 bool MyEventReceiver::OnEvent(const SEvent &event)
 {
-	// MineBoost: keybinds set via the "Colors"/settings menu (middle-click
-	// a tile to bind it, see startBindCapture() in
-	// src/gui/custom_menu/Menu.cpp) need to toggle their setting the same
-	// way whether that menu is open, closed, or was never opened this
-	// session -- that's the whole point of a keybind. Checked here,
-	// completely unconditionally, before any of the menu-active/early-
-	// return branches below, since those are exactly what used to make
-	// this only work while the settings menu was open (see the comment on
-	// Menu::checkGlobalBinds() in src/gui/custom_menu/Menu.h for the full
-	// story). Never consumes the event -- it's a pure side effect, so a
-	// bind never blocks whatever that key/button would otherwise do.
-	Menu::checkGlobalBinds(event);
-	// Lets the settings menu (Colors, HandView, keybinds, ...) be opened
-	// from the title screen too, before ever joining a world -- see the
-	// comment on Menu::checkMainMenuOpenKeybind() in
-	// src/gui/custom_menu/Menu.h. No-op whenever the only Menu instance
-	// that currently exists is the in-game one (it has a Client); that
-	// one keeps opening via Game::processKeyInput() exactly as before.
-	Menu::checkMainMenuOpenKeybind(event);
+	// MineBoost: keybinds set via the settings menu (click "Bind: ..."
+	// next to a toggle, see ImGuiMineBoostMenu::drawSettingToggle() in
+	// src/gui/custom_menu/ImGuiMineBoostMenu.cpp) need to toggle their
+	// setting the same way whether that menu is open, closed, or was
+	// never opened this session -- that's the whole point of a keybind.
+	// Checked here, completely unconditionally, before any of the
+	// menu-active/early-return branches below, since those are exactly
+	// what would otherwise make this only work while the settings menu
+	// was open (see the comment on ImGuiMineBoostMenu::checkGlobalBinds()
+	// in src/gui/custom_menu/ImGuiMineBoostMenu.h for the full story).
+	// Never consumes the event -- it's a pure side effect, so a bind
+	// never blocks whatever that key/button would otherwise do.
+	ImGuiMineBoostMenu::get().checkGlobalBinds(event);
+	// Lets the settings menu (Colors, HandView, PhotoHUD, keybinds, ...)
+	// be opened/closed from the title screen too, before ever joining a
+	// world -- see the comment on ImGuiMineBoostMenu::checkOpenKeybind()
+	// in src/gui/custom_menu/ImGuiMineBoostMenu.h. Unconditional and
+	// always-toggling now, unlike the old split between a title-screen-
+	// only path and a separate in-game one this replaces -- there's one
+	// persistent menu instance (a singleton, not owned per-Game-session/
+	// per-title-screen-visit) now, so one always-on path covers both.
+	ImGuiMineBoostMenu::get().checkOpenKeybind(event);
+
+	// Bind capture (the player clicked "Bind: ..." in the settings menu
+	// and the very next key/mouse press should be assigned, not treated
+	// as normal ImGui widget interaction) takes priority over
+	// everything below, including ImGuiManager's own capture check right
+	// after this -- see the comment on ImGuiMineBoostMenu::processEvent()
+	// in src/gui/custom_menu/ImGuiMineBoostMenu.h for why the ordering
+	// here matters.
+	if (ImGuiMineBoostMenu::get().processEvent(event))
+		return true;
+
+	// Same reasoning as the two calls above: don't rely on Irrlicht's own
+	// Focus-based dispatch (CGUIEnvironment::postEventFromUser()) to reach
+	// this window reliably -- forward directly and unconditionally while
+	// it's open, and swallow the event here if it was consumed.
+#if 0 // MineBoost: ClientChat temporarily disabled -- see the comment on
+      // the "gui/guiClientChat.h" include above.
+	if (GUIClientChat::forwardEvent(event))
+		return true;
+#endif
+
+	// MineBoost: Dear ImGui integration (see src/gui/ImGuiManager.h) --
+	// same "forward first, swallow if consumed" pattern as the two calls
+	// above. Only actually consumes the event (returns true) while an
+	// ImGui window is up *and* it's the one under the mouse/holding
+	// keyboard focus (ImGuiIO::WantCaptureMouse/WantCaptureKeyboard) --
+	// covers every real MineBoostV2 menu now (see
+	// src/gui/custom_menu/ImGuiMineBoostMenu.h), not just the demo/test
+	// window from when this was first wired up.
+	if (ImGuiManager::get().processEvent(event))
+		return true;
+
+	// Demo/test window toggle -- checked completely unconditionally
+	// (like ImGuiMineBoostMenu::checkGlobalBinds()/checkOpenKeybind()
+	// above), so it works from the title screen too, before ever joining
+	// a world, same as those. Deliberately doesn't consume the event
+	// even when it matches, since this is a debug/verification toggle,
+	// not a real keybind that should block whatever else that key does.
+	ImGuiManager::get().checkDemoToggleKey(event);
 
 	if (event.EventType == irr::EET_LOG_TEXT_EVENT) {
 		static const LogLevel irr_loglev_conv[] = {

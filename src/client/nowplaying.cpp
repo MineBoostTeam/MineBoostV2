@@ -11,6 +11,7 @@
 #include <cwctype>
 #include <thread>
 #include <mutex>
+#include <atomic>
 #include <condition_variable>
 #include <chrono>
 #include <memory>
@@ -874,6 +875,175 @@ private:
 			out.data(), size, nullptr, nullptr);
 		return out;
 	}
+};
+
+#elif defined(__APPLE__)
+
+#include <dlfcn.h>
+#include <dispatch/dispatch.h>
+#include <CoreFoundation/CoreFoundation.h>
+
+namespace {
+	// MediaRemote is a private, undocumented Apple framework -- there is
+	// no public API for reading *another* app's now-playing info on
+	// macOS (MPNowPlayingInfoCenter only lets an app publish its own).
+	// This is the same technique widely-used third-party "now playing"
+	// tools (nowplaying-cli, MediaRemoteAdapter, various menu bar apps)
+	// rely on: dlopen the framework at its fixed system path and dlsym
+	// the handful of C functions it exports, since there's no header to
+	// link against normally. Being private/undocumented, this can in
+	// principle stop working in a future macOS release; if it ever does,
+	// dlopen/dlsym simply fail and MediaRemoteProvider::poll() below
+	// always returns false, same as "unsupported platform" -- it doesn't
+	// crash or need a code change to keep working everywhere else.
+	typedef void (^NowPlayingInfoBlock)(CFDictionaryRef information);
+	typedef void (*GetNowPlayingInfoFunc)(dispatch_queue_t queue, NowPlayingInfoBlock handler);
+
+	std::string cfStringToStd(CFStringRef s)
+	{
+		if (!s)
+			return "";
+		CFIndex len = CFStringGetLength(s);
+		CFIndex max_size = CFStringGetMaximumSizeForEncoding(len, kCFStringEncodingUTF8) + 1;
+		std::string out(max_size, '\0');
+		if (!CFStringGetCString(s, out.data(), max_size, kCFStringEncodingUTF8))
+			return "";
+		out.resize(strlen(out.c_str()));
+		return out;
+	}
+}
+
+// All MediaRemote calls happen on a dedicated dispatch queue via its own
+// (callback-based, not synchronous) API -- poll() itself never blocks:
+// it kicks off a fresh async request and returns whatever the *previous*
+// request produced, so it's always one poll cycle (up to
+// POLL_INTERVAL_MS, see the top of this file) behind. Unnoticeable for a
+// "what's playing" HUD, and avoids blocking the render thread on an
+// inter-process call to a system daemon (mediaremoted).
+class MediaRemoteProvider
+{
+public:
+	MediaRemoteProvider()
+	{
+		m_handle = dlopen(
+			"/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote",
+			RTLD_LAZY);
+		if (!m_handle)
+			return;
+		m_get_info = (GetNowPlayingInfoFunc)dlsym(m_handle, "MRMediaRemoteGetNowPlayingInfo");
+		if (!m_get_info)
+			return;
+		m_queue = dispatch_queue_create("org.mineboostv2.nowplaying", DISPATCH_QUEUE_SERIAL);
+	}
+
+	~MediaRemoteProvider()
+	{
+		if (m_handle)
+			dlclose(m_handle);
+	}
+
+	bool poll(NowPlayingInfo *out)
+	{
+		if (!m_get_info)
+			return false;
+
+		bool have_result;
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			have_result = m_ready && m_latest.active;
+			if (have_result)
+				*out = m_latest;
+		}
+		requestUpdate();
+		return have_result;
+	}
+
+private:
+	void requestUpdate()
+	{
+		if (m_request_pending.exchange(true))
+			return; // Previous request hasn't come back yet.
+
+		// __block-less: the handler only reads `this` (a stable pointer
+		// for MediaRemoteProvider's whole lifetime), so it's captured by
+		// value like any other variable a block closes over.
+		MediaRemoteProvider *self = this;
+		m_get_info(m_queue, ^(CFDictionaryRef info) {
+			self->handleInfo(info);
+			self->m_request_pending = false;
+		});
+	}
+
+	void handleInfo(CFDictionaryRef info)
+	{
+		NowPlayingInfo result;
+		if (info) {
+			CFStringRef title = (CFStringRef)CFDictionaryGetValue(
+				info, CFSTR("kMRMediaRemoteNowPlayingInfoTitle"));
+			CFStringRef artist = (CFStringRef)CFDictionaryGetValue(
+				info, CFSTR("kMRMediaRemoteNowPlayingInfoArtist"));
+
+			if (title || artist) {
+				// No reliable "is it actually playing vs paused" flag
+				// in every macOS version's info dict (the playback-rate
+				// key isn't always present) -- if MediaRemote is
+				// reporting *any* now-playing info at all, treat that
+				// as active. Matches this file's Linux/MPRIS behavior,
+				// which does the same when a player's PlaybackStatus
+				// property is missing.
+				result.active = true;
+				result.title = cfStringToStd(title);
+				result.artist = cfStringToStd(artist);
+				result.source = "Media";
+
+				CFNumberRef elapsed = (CFNumberRef)CFDictionaryGetValue(
+					info, CFSTR("kMRMediaRemoteNowPlayingInfoElapsedTime"));
+				CFNumberRef duration = (CFNumberRef)CFDictionaryGetValue(
+					info, CFSTR("kMRMediaRemoteNowPlayingInfoDuration"));
+				double elapsed_s = 0.0, duration_s = 0.0;
+				if (elapsed && CFNumberGetValue(elapsed, kCFNumberDoubleType, &elapsed_s) &&
+						duration && CFNumberGetValue(duration, kCFNumberDoubleType, &duration_s) &&
+						duration_s > 0.0) {
+					result.has_progress = true;
+					result.position_seconds = (int)elapsed_s;
+					result.duration_seconds = (int)duration_s;
+				}
+
+				CFDataRef art = (CFDataRef)CFDictionaryGetValue(
+					info, CFSTR("kMRMediaRemoteNowPlayingInfoArtworkData"));
+				if (art) {
+					CFIndex len = CFDataGetLength(art);
+					if (len > 0) {
+						result.has_thumbnail = true;
+						result.thumbnail_data.assign(
+							(const char *)CFDataGetBytePtr(art), (size_t)len);
+						result.thumbnail_id = (unsigned long long)CFHash(art);
+					}
+				}
+			}
+		}
+
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_latest = result;
+		m_ready = true;
+	}
+
+	void *m_handle = nullptr;
+	GetNowPlayingInfoFunc m_get_info = nullptr;
+	dispatch_queue_t m_queue = nullptr;
+	std::atomic<bool> m_request_pending{false};
+	std::mutex m_mutex;
+	bool m_ready = false;
+	NowPlayingInfo m_latest;
+};
+
+class NowPlayingProviderImpl
+{
+public:
+	bool poll(NowPlayingInfo *out) { return m_provider.poll(out); }
+
+private:
+	MediaRemoteProvider m_provider;
 };
 
 #else

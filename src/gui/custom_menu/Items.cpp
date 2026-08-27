@@ -69,7 +69,20 @@ void Items::draw(irr::video::IVideoDriver *driver, s32 screenW, s32 screenH)
 {
     this->screenW = screenW;
     this->screenH = screenH;
-    bool enabled = g_settings->getBool(this->setting_item);
+    // g_settings->getBool() (unlike isPressed()'s own read just above, which
+    // already checks exists() first) throws SettingNotFoundException for
+    // any setting that has neither a saved value nor a registered default
+    // -- uncaught here, that's a hard crash of the whole client the moment
+    // this tile's category tab is drawn, indistinguishable from a genuine
+    // segfault to a player (see e.g. the "use_custom_fog_color" default
+    // bug fixed in src/defaultsettings.cpp -- this class had no defense
+    // against that ever happening again for THIS or any other tile).
+    // exists() is itself layer-aware (checks the defaults layer too, not
+    // just a saved value), so this only ever falls back to `false` for a
+    // setting_item that's missing from both -- a config bug elsewhere to
+    // fix, not something this tile should ever crash the client over.
+    bool enabled = g_settings->exists(this->setting_item) &&
+        g_settings->getBool(this->setting_item);
     // Same dark ModernUI fill either way (keeps the grid visually calm),
     // but a green accent border when the setting is on vs. the usual dim
     // blue when it's off -- readable at a glance without the old

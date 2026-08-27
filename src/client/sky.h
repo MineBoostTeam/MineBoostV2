@@ -132,6 +132,23 @@ public:
 	const char* SkyTextures[6] = {"top.jpg", "bottom.jpg", "east.jpg", "west.jpg", "south.jpg", "north.jpg"};
 
 private:
+	// Per-face custom skybox texture paths (MineBoost) -- setting names,
+	// in the same order as SkyTextures[] above, for "skybox_texture_top"
+	// / "_bottom" / "_east" / "_west" / "_south" / "_north" (see
+	// src/defaultsettings.cpp). Used by loadSkyboxFaceTexture() below.
+	const char* SkyTextureSettings[6] = {
+		"skybox_texture_top", "skybox_texture_bottom", "skybox_texture_east",
+		"skybox_texture_west", "skybox_texture_south", "skybox_texture_north"
+	};
+
+	// Resolves face `index` (0..5, matching SkyTextures[]/SkyTextureSettings[]
+	// above) to a texture: a player-supplied absolute file path from
+	// "skybox_texture_<face>" if that setting is non-empty and the file
+	// exists and loads successfully, otherwise the built-in
+	// SkyTextures[index] mesh texture (unchanged fallback behavior).
+	video::ITexture *loadSkyboxFaceTexture(int index, ITextureSource *tsrc);
+
+
 	aabb3f m_box{{0.0f, 0.0f, 0.0f}};
 	video::SMaterial m_materials[SKY_MATERIAL_COUNT];
 	// How much sun & moon transition should affect horizon color

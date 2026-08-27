@@ -50,11 +50,27 @@ void DrawHUD::run(PipelineContext &context)
 		if (context.draw_crosshair)
 			context.hud->drawCrosshair();
 
+		// KeyStroker/ShowCPS and Coords/ShowFPS/ShowPing are fully
+		// native/ImGui-drawn now (see Hud::drawKeyStrokerHud()/
+		// drawCpsHud()/drawCoordsHud()/drawFpsHud()/drawPingHud() in
+		// src/client/hud.cpp) -- the strict ordering the old background-
+		// panel-only versions of these needed relative to
+		// drawLuaElements() (KeyStroker/CPS content used to be Lua-
+		// registered HUD elements drawn there) no longer applies: ImGui
+		// renders in its own separate pass entirely, well after
+		// everything in this function, via ImGuiManager::renderFrame()
+		// (src/gui/ImGuiManager.cpp). Order relative to drawLuaElements()
+		// below is now arbitrary.
+		context.hud->drawKeyStrokerHud();
+		context.hud->drawCpsHud();
 		context.hud->drawLuaElements(context.client->getCamera()->getOffset());
 		context.hud->drawMusicHud();
+		context.hud->drawShowRp();
+		context.hud->drawConsumptionHud();
 		context.hud->drawPhotoHud();
-		context.hud->drawDebugTextBackgrounds();
-		context.hud->drawKeyStrokerCpsBackgrounds();
+		context.hud->drawCoordsHud();
+		context.hud->drawFpsHud();
+		context.hud->drawPingHud();
 		context.hud->drawMacroWheel();
 		context.client->getCamera()->drawNametags();
 		context.client->getCamera()->drawFriendESP();

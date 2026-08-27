@@ -474,6 +474,23 @@ local function update_key_states()
     end
 end
 
+-- MineBoost: KeyStroker/ShowCPS's own HUD elements (the key icons and
+-- CPS counters this file creates via minetest.localplayer:hud_add()) are
+-- disabled here -- both are now drawn by MineBoostV2's ImGui-based HUD
+-- instead (see Hud::drawKeyStrokerHud()/drawCpsHud() in
+-- src/client/hud.cpp and src/gui/imgui_hud.h/.cpp), which replicates the
+-- same "up/left/down/right/jump/aux1/sneak/dig/place" key-state reading
+-- and LMB/RMB click-per-second counting natively in C++ (via
+-- LocalPlayer::getPlayerControl(), no Lua involvement) rather than
+-- needing anything from here. Left both blocks below fully intact,
+-- wrapped in "if false then" (Lua's equivalent of a C++ "#if 0") rather
+-- than deleted, exactly like MineBoostV2's ClientChat is currently
+-- disabled on the C++ side (see the comment on that in
+-- src/client/game.cpp) -- restore by changing "if false then" back to
+-- "if true then" on both blocks below, and reverting whatever disabled
+-- the equivalent native drawing (see the two functions named above).
+if false then
+
 -- Инициализация
 minetest.after(0, function()
     if not minetest.localplayer then
@@ -487,6 +504,10 @@ minetest.after(0, function()
         initialize_cps_hud()
     end
 end)
+
+end -- if false then (init block)
+
+if false then
 
 minetest.register_globalstep(function(dtime)
     if not minetest.localplayer then return end
@@ -528,6 +549,8 @@ minetest.register_globalstep(function(dtime)
         end
     end
 end)
+
+end -- if false then (globalstep block)
 
 --[[
     GNU GENERAL PUBLIC LICENSE Version 3, 29 June 2007

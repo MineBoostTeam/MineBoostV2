@@ -101,6 +101,14 @@ private:
 	void resendCachedActivity();
 	void sendActivityFrame();
 
+	// Gates the enabled-checkbox re-read and (once connected) the
+	// pipe-drain syscall below to a fixed interval -- poll() itself is
+	// still called once per rendered frame from Game::run() (unchanged,
+	// so nothing else needs to know about this), but neither the
+	// checkbox nor Discord's IPC acks (which are discarded either way,
+	// see drainIncoming()) need sub-second freshness.
+	uint64_t m_next_poll_work_ms = 0;
+
 	bool m_connected = false;
 	bool m_enabled = false;
 	bool m_configured = false;

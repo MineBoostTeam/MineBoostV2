@@ -73,7 +73,12 @@ jobs:
     env:
       VCPKG_VERSION: 01f602195983451bc83e72f4214af2cbc495aa94
       # 2024.05.24
-      vcpkg_packages: zlib zstd curl[winssl] openal-soft libvorbis libogg libjpeg-turbo sqlite3 freetype luajit gmp jsoncpp sdl2
+      # cppwinrt: MusicHud's Windows System Media Transport Controls
+      # backend (album art + playback position) -- see the
+      # HAVE_WINRT_SMTC check in src/CMakeLists.txt. Without it, NowPlaying
+      # silently falls back to scraping the Spotify window's title bar
+      # (title/artist only, no art, no progress).
+      vcpkg_packages: zlib zstd curl[winssl] openal-soft libvorbis libogg libjpeg-turbo sqlite3 freetype luajit gmp jsoncpp sdl2 cppwinrt
     strategy:
       fail-fast: false
       matrix:

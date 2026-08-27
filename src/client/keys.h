@@ -58,6 +58,7 @@ public:
 		ZOOM,
 		SPRITES,
 		MENU,
+		CLIENTCHAT,
 		LEFT_HAND,
 
 		QUICKTUNE_NEXT,

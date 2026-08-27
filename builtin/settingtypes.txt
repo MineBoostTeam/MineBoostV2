@@ -219,6 +219,24 @@ display_sunrise (Display sunrise) bool true
 force_custom_skybox (Force custom skybox) bool false
 # Enable force render skybox?
 force_render_skybox (Force render skybox) bool true
+# Custom texture for the top skybox face (used while "Custom skybox" is enabled).
+# Leave empty to use the built-in texture.
+skybox_texture_top (Skybox texture: top) path
+# Custom texture for the bottom skybox face (used while "Custom skybox" is enabled).
+# Leave empty to use the built-in texture.
+skybox_texture_bottom (Skybox texture: bottom) path
+# Custom texture for the east skybox face (used while "Custom skybox" is enabled).
+# Leave empty to use the built-in texture.
+skybox_texture_east (Skybox texture: east) path
+# Custom texture for the west skybox face (used while "Custom skybox" is enabled).
+# Leave empty to use the built-in texture.
+skybox_texture_west (Skybox texture: west) path
+# Custom texture for the south skybox face (used while "Custom skybox" is enabled).
+# Leave empty to use the built-in texture.
+skybox_texture_south (Skybox texture: south) path
+# Custom texture for the north skybox face (used while "Custom skybox" is enabled).
+# Leave empty to use the built-in texture.
+skybox_texture_north (Skybox texture: north) path
 # Enbale custom fog?
 use_custom_fog_color (Custom fog color) bool false
 # Color of fog

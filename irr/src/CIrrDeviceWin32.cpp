@@ -868,6 +868,21 @@ CIrrDeviceWin32::CIrrDeviceWin32(const SIrrlichtCreationParameters &params) :
 	if (!ExternalWindow) {
 		SetActiveWindow(HWnd);
 		SetForegroundWindow(HWnd);
+		// SetActiveWindow()/SetForegroundWindow() only make this the
+		// active/foreground window at the window-manager level -- neither
+		// one grants actual Win32 keyboard input focus. isWindowFocused()
+		// (below) checks GetFocus() == HWnd specifically, and without an
+		// explicit SetFocus() call here, GetFocus() stays null/stale right
+		// after window creation even though the window is genuinely
+		// visible, active, and in the foreground. Until the player's first
+		// click inside the client area happens to set it (via the default
+		// click-to-activate handling), isWindowFocused() incorrectly
+		// reports "unfocused" -- which made FpsControl::limit() (see
+		// src/client/renderingengine.cpp) apply "fps_max_unfocused" for
+		// the whole loading/connecting sequence and part of actual
+		// gameplay, right up until that first click, even though the
+		// window was visibly focused the entire time.
+		SetFocus(HWnd);
 	}
 
 	KEYBOARD_INPUT_HKL = GetKeyboardLayout(0);

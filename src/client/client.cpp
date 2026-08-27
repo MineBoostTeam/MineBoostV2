@@ -24,6 +24,9 @@
 #include "client/friendlist.h"
 #include "client/macrolist.h"
 #include "client/mineboost_presence.h"
+// MineBoost: ClientChat temporarily disabled -- see the matching #if 0
+// block below and the comment in src/client/game.cpp.
+// #include "client/clientchat.h"
 #include "chatmessage.h"
 #include "util/auth.h"
 #include "util/directiontables.h"
@@ -470,6 +473,15 @@ void Client::step(float dtime)
 	// "mineboost_presence_server_url" is set.
 	if (LocalPlayer *myplayer = m_env.getLocalPlayer())
 		MineBoostPresence::get().step(dtime, myplayer->getName());
+
+#if 0 // MineBoost: ClientChat temporarily disabled -- see the comment on
+      // the "client/clientchat.h" include above.
+	// ClientChat -- see src/client/clientchat.h. Also harmless to call
+	// unconditionally: a no-op unless "clientchat_server_url" is set or
+	// the player is actively logging in/logged in.
+	if (LocalPlayer *myplayer = m_env.getLocalPlayer())
+		ClientChat::get().step(dtime, myplayer->getName());
+#endif
 
 	/*
 		Run Map's timers and unload unused data

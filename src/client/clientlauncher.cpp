@@ -15,7 +15,8 @@
 #include "inputhandler.h"
 #include "profiler.h"
 #include "gui/guiEngine.h"
-#include "gui/custom_menu/Menu.h"
+#include "gui/custom_menu/ImGuiMineBoostMenu.h"
+#include "gui/ImGuiManager.h"
 #include "fontengine.h"
 #include "clientlauncher.h"
 #include "discordrpc.h"
@@ -70,6 +71,14 @@ ClientLauncher::~ClientLauncher()
 	guienv = nullptr;
 	assert(g_menumgr.menuCount() == 0);
 
+	// MineBoost: Dear ImGui integration -- shut down before the
+	// rendering device/driver/GL context goes away right below
+	// (ImGui_ImplOpenGL3_Shutdown() makes real GL calls, e.g.
+	// glDeleteTextures() for the font atlas, so this has to happen while
+	// that context is still current/valid). Safe even if init() was
+	// never called or already failed -- see ImGuiManager::shutdown().
+	ImGuiManager::get().shutdown();
+
 	delete m_rendering_engine;
 
 	// delete event receiver only after all Irrlicht stuff is gone
@@ -104,6 +113,16 @@ bool ClientLauncher::run(GameStartData &start_data, const Settings &cmd_args)
 		errorstream << "Could not initialize video driver." << std::endl;
 		return false;
 	}
+
+	// MineBoost: Dear ImGui integration (see src/gui/ImGuiManager.h) --
+	// initialized once here, right after the video driver/GL context
+	// exists, rather than per-Game-session like Menu/the old GUIClientChat
+	// are: the GL context and window live for the whole process, across
+	// every connect/reconnect and the title screen, so ImGui's context
+	// should too. A failure here (logged by init() itself) just leaves
+	// ImGui disabled for the session -- see the "never a reason the
+	// client can't start" contract on every ImGuiManager method.
+	ImGuiManager::get().init(m_rendering_engine->get_video_driver());
 
 	m_rendering_engine->setupTopLevelWindow();
 
@@ -575,26 +594,24 @@ void ClientLauncher::main_menu(MainMenuData *menudata)
 	}
 
 	/* show main menu */
-	// MineBoostV2 settings menu (Colors, HandView, keybinds, ...),
-	// reachable from the title screen too via "keymap_menu" -- see
-	// Menu::checkMainMenuOpenKeybind() in src/gui/custom_menu/Menu.cpp
-	// for how it gets toggled without a Game/Client around yet. Sibling
-	// of GUIEngine on the same guiroot rather than owned by it, so it
-	// keeps working across GUIEngine's own internal menu-switching
-	// (server list, settings tabs, etc.) exactly like it does in-game
-	// across formspecs/the pause menu. Closed and removed (not left for
-	// GUIEngine's own teardown to find) before this function returns, so
-	// a later trip back to the title screen after disconnecting starts
-	// with a fresh instance on the also-freshly-recreated guiroot,
-	// rather than something still attached to what's about to become a
-	// dangling parent.
-	Menu *mainmenu_client_menu = new Menu(
-		m_rendering_engine->get_gui_env(), guiroot, -1, &g_menumgr, nullptr);
+	// MineBoostV2 settings menu (Colors, HandView, PhotoHUD, keybinds,
+	// ...) is reachable from the title screen too via "keymap_menu" --
+	// unlike the old Irrlicht-custom-widget Menu class this used to be
+	// (see src/gui/custom_menu/Menu.h's own comment on why it's no
+	// longer built), the new ImGui-based ImGuiMineBoostMenu
+	// (src/gui/custom_menu/ImGuiMineBoostMenu.h) is a single persistent
+	// singleton spanning the whole process rather than something
+	// constructed fresh per title-screen visit and torn down again
+	// before this function returns -- nothing to construct/destroy
+	// here. setClient(nullptr) below is defensive belt-and-suspenders:
+	// Game::~Game() (src/client/game.cpp) already clears it on every
+	// session end, so by the time a disconnect brings us back here it
+	// should already be null, but this guards against any other path
+	// into main_menu() (e.g. a future one) that doesn't go through that
+	// same teardown.
+	ImGuiMineBoostMenu::get().setClient(nullptr);
 
 	GUIEngine mymenu(&input->joystick, guiroot, m_rendering_engine, &g_menumgr, menudata, *kill);
-
-	mainmenu_client_menu->close();
-	mainmenu_client_menu->remove();
 
 	/* leave scene manager in a clean state */
 	m_rendering_engine->get_scene_manager()->clear();

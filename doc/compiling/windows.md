@@ -14,7 +14,7 @@ It is highly recommended to use vcpkg as package manager.
 
 After you successfully built vcpkg you can easily install the required libraries:
 ```powershell
-vcpkg install zlib zstd curl[winssl] openal-soft libvorbis libogg libjpeg-turbo sqlite3 freetype luajit gmp jsoncpp gettext[tools] sdl2 --triplet x64-windows
+vcpkg install zlib zstd curl[winssl] openal-soft libvorbis libogg libjpeg-turbo sqlite3 freetype luajit gmp jsoncpp gettext[tools] sdl2 cppwinrt --triplet x64-windows
 ```
 
 - `curl` is optional, but required to read the serverlist, `curl[winssl]` is required to use the content store.
@@ -22,6 +22,7 @@ vcpkg install zlib zstd curl[winssl] openal-soft libvorbis libogg libjpeg-turbo 
 - `luajit` is optional, it replaces the integrated Lua interpreter with a faster just-in-time interpreter.
 - `gmp` and `jsoncpp` are optional, otherwise the bundled versions will be compiled
 - `gettext` is optional, but required to use translations.
+- `cppwinrt` is optional, but required for MusicHud's NowPlaying to read album art and playback position via Windows System Media Transport Controls; without it, NowPlaying falls back to reading the Spotify window's title bar (title/artist only, no art, no progress). Same package name if building with MSYS2 instead: `pacman -S mingw-w64-clang-x86_64-cppwinrt` (or the `mingw-w64-x86_64-`/`mingw-w64-ucrt-x86_64-` prefix for the MINGW64/UCRT64 environments).
 
 There are other optional libraries, but they are not tested if they can build and link correctly.
 

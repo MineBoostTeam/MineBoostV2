@@ -40,6 +40,12 @@ public:
         onClickCallback = callback;
     }
 
+    // Updates just the label -- e.g. an on/off toggle button whose text
+    // reflects current state (see photo_show_in_game_button in
+    // src/gui/custom_menu/Menu.h/.cpp). Position/size/visibility are
+    // untouched, unlike calling addButton() again with the same rect.
+    inline void setText(std::wstring new_title) { this->title = new_title; }
+
     // Used for category tab buttons (GUI/Render/Movement/Scrollbars) so the
     // currently-selected tab can be highlighted -- see
     // Menu::updateCategoryButtonActiveStates() in Menu.cpp.

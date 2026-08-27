@@ -8,6 +8,12 @@ install_linux_deps() {
 		libsqlite3-dev libhiredis-dev libogg-dev libgmp-dev libvorbis-dev
 		libopenal-dev libpq-dev libleveldb-dev libcurl4-openssl-dev libzstd-dev
 		libssl-dev
+		# MusicHud's Linux "now playing" backend (src/client/nowplaying.cpp)
+		# reads MPRIS2 over D-Bus -- without this, HAVE_DBUS never gets
+		# defined (see the pkg_check_modules(DBUS ... dbus-1) check in
+		# src/CMakeLists.txt) and NowPlaying silently no-ops on Linux, with
+		# no fallback the way the Windows build has one.
+		libdbus-1-dev
 	)
 
 	sudo apt-get update

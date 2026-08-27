@@ -75,6 +75,20 @@ void DiscordRPC::poll()
 	if (!m_configured)
 		return;
 
+	// Skip the checkbox re-read + drain syscall below on most frames --
+	// this function used to do both unconditionally every single call
+	// (i.e. every rendered frame, since Game::run() calls poll() once per
+	// frame), which at a few hundred FPS meant a few hundred settings
+	// lookups and a few hundred non-blocking recv()/PeekNamedPipe calls a
+	// second for no observable benefit (Discord's IPC acks are discarded
+	// either way -- see drainIncoming()). 200ms is still far more
+	// responsive than a human toggling the setting or Discord itself
+	// restarting could ever notice.
+	uint64_t now = porting::getTimeMs();
+	if (now < m_next_poll_work_ms)
+		return;
+	m_next_poll_work_ms = now + 200;
+
 	// React live to the "discord_rpc_enabled" checkbox, whether it's
 	// flipped from the settings menu, the in-game GUI toggle, or the
 	// pause-menu checkbox.
@@ -95,7 +109,6 @@ void DiscordRPC::poll()
 		return;
 
 	if (!m_connected) {
-		uint64_t now = porting::getTimeMs();
 		if (now < m_next_reconnect_attempt_ms)
 			return;
 		m_next_reconnect_attempt_ms = now + RECONNECT_INTERVAL_MS;

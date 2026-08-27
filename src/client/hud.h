@@ -13,6 +13,7 @@
 #include "irr_aabb3d.h"
 #include "../hud.h"
 #include "nowplaying.h"
+#include "photohud.h"
 
 class Client;
 class ITextureSource;
@@ -86,9 +87,14 @@ public:
 	void drawSelectionMesh();
 	void drawTargetHud();
 	void drawMusicHud();
+	void drawShowRp();
+	void drawConsumptionHud();
 	void drawPhotoHud();
-	void drawDebugTextBackgrounds();
-	void drawKeyStrokerCpsBackgrounds();
+	void drawCoordsHud();
+	void drawFpsHud();
+	void drawPingHud();
+	void drawKeyStrokerHud();
+	void drawCpsHud();
 	void drawMacroWheel();
 	void drawInventoryHud();
 	void drawCraftHud();
@@ -125,6 +131,28 @@ private:
 	video::ITexture *m_music_thumbnail_texture = nullptr;
 	unsigned long long m_music_thumbnail_id = 0;
 	void updateMusicThumbnail(const NowPlayingInfo &info);
+	// Cache for drawMusicHud()'s utf8_to_wide() conversions of
+	// info.source/title/artist -- NowPlayingProvider::poll() already only
+	// refreshes that data ~once/second, but without this the 3 conversions
+	// (plus the "[source]" concatenation) were redone from scratch every
+	// single rendered frame regardless, for text that's almost always
+	// identical to the previous frame's. Keyed on the plain (non-wide)
+	// strings actually read from `info`, not the wide/formatted output.
+	std::string m_music_wcache_source, m_music_wcache_title, m_music_wcache_artist;
+	std::wstring m_music_wline1, m_music_wline2, m_music_wline3;
+
+	// ShowRP ("show_rp") -- displays the currently active texture pack's
+	// own screenshot.png/texture_pack.conf (title, author), the same
+	// metadata/convention ContentDB packages and the main menu's content
+	// browser use (see load_texture_packs() in
+	// builtin/mainmenu/content/pkgmgr.lua). Re-read only when
+	// "texture_path" changes, not every frame -- see drawShowRp() in
+	// src/client/hud.cpp.
+	std::string m_rp_cached_texture_path;
+	bool m_rp_active = false;
+	std::string m_rp_title;
+	std::string m_rp_author;
+	video::ITexture *m_rp_screenshot_texture = nullptr;
 	void drawStatbar(v2s32 pos, u16 corner, u16 drawdir,
 			const std::string &texture, const std::string& bgtexture,
 			s32 count, s32 maxcount, v2s32 offset, v2s32 size = v2s32());
@@ -147,6 +175,30 @@ private:
 	LocalPlayer *player = nullptr;
 	Inventory *inventory = nullptr;
 	ITextureSource *tsrc = nullptr;
+
+	// See src/client/photohud.h -- owns all of PhotoHUD's own state,
+	// initialized in Hud::Hud() once driver/tsrc above are set.
+	PhotoHud m_photo_hud;
+
+	// FPS smoothing for drawFpsHud() (src/client/hud.cpp) -- this class
+	// doesn't have access to GameUI's own RunStats::dtime_jitter (see
+	// the comment on that in drawFpsHud()), so it tracks its own simple
+	// exponential moving average of frame-to-frame time instead.
+	u64 m_fps_last_time_ms = 0;
+	float m_fps_smoothed = 0.0f;
+
+	// LMB/RMB clicks-per-second tracking for drawCpsHud() (src/client/
+	// hud.cpp) -- same rising-edge-detect-then-reset-every-1s algorithm
+	// builtin/client/keystroker.lua's track_lmb_clicks()/
+	// track_rmb_clicks() used, now done natively instead (see the
+	// comment on that in drawCpsHud()).
+	u64 m_cps_last_time_ms = 0;
+	bool m_cps_lmb_was_down = false;
+	bool m_cps_rmb_was_down = false;
+	int m_cps_lmb_clicks = 0;
+	int m_cps_rmb_clicks = 0;
+	float m_cps_lmb_timer = 0.0f;
+	float m_cps_rmb_timer = 0.0f;
 
 	float m_hud_scaling; // cached minetest setting
 	float m_scale_factor;

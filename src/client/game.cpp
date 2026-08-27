@@ -65,7 +65,19 @@
 #include <IAnimatedMeshSceneNode.h>
 #include "util/tracy_wrapper.h"
 #include "gui/SpriteManager.h"
-#include "gui/custom_menu/Menu.h"
+#include "gui/custom_menu/ImGuiMineBoostMenu.h"
+#include "gui/ImGuiManager.h"
+// MineBoost: ClientChat temporarily disabled -- see the matching #if 0
+// blocks below (clientchat_window member/creation/destructor/keybinds) and
+// in src/client/inputhandler.cpp and src/client/client.cpp. The
+// implementation itself (src/client/clientchat.cpp/.h,
+// src/gui/guiClientChat.cpp/.h) is untouched and still fully present; it's
+// just been taken out of the build in src/gui/CMakeLists.txt and
+// src/client/CMakeLists.txt. To restore ClientChat: re-add those two
+// CMakeLists.txt entries, and remove every "#if 0 // MineBoost: ClientChat
+// temporarily disabled" / "#endif" pair (search the project for that
+// comment).
+// #include "gui/guiClientChat.h"
 
 #if USE_SOUND
 	#include "client/sound/sound_openal.h"
@@ -710,6 +722,19 @@ private:
 	std::string m_discord_last_large_text_sent;
 	bool m_discord_last_hidden = false;
 	bool m_discord_configured = false;
+	// Gates the *evaluation* in updateDiscordActivity(false) (reading
+	// "discord_rpc_hidden_servers"/"discord_rpc_show_playing"/
+	// "discord_rpc_show_nickname", splitting/trimming the hidden-servers
+	// list, rebuilding state_text/large_text) to a fixed interval instead
+	// of doing that work every single rendered frame -- these settings
+	// change at most a few times per session (if ever), and even Discord's
+	// own IPC rate-limits SET_ACTIVITY well below once-per-frame, so
+	// re-checking every ~1s is imperceptible while cutting this from
+	// potentially hundreds of redundant settings lookups + string
+	// allocations per second down to one. force=true (session (re)configure,
+	// see configureDiscordActivity() above) always bypasses this and runs
+	// immediately, same as before.
+	float discord_activity_check_timer = 0;
 
 	bool nodePlacement(const ItemDefinition &selected_def, const ItemStack &selected_item,
 		const v3s16 &nodepos, const v3s16 &neighborpos, const PointedThing &pointed,
@@ -744,7 +769,18 @@ private:
 
 	std::unique_ptr<GameUI> m_game_ui;
 	irr_ptr<GUIChatConsole> gui_chat_console;
-	Menu* menu = nullptr;
+	// MineBoost: the settings menu is now the ImGui-based singleton
+	// ImGuiMineBoostMenu (src/gui/custom_menu/ImGuiMineBoostMenu.h) --
+	// see setClient() below/in Game's destructor, and
+	// MyEventReceiver::OnEvent() (src/client/inputhandler.cpp) for the
+	// keybind that opens/closes it. No per-Game-session instance to own
+	// here anymore (unlike the old Irrlicht-custom-widget Menu, which
+	// this replaces -- see src/gui/custom_menu/Menu.h's own comment on
+	// why it's no longer built).
+#if 0 // MineBoost: ClientChat temporarily disabled -- see the comment on
+      // the "gui/guiClientChat.h" include above.
+	GUIClientChat *clientchat_window = nullptr;
+#endif
 	SpriteManager* manager = nullptr;
 	MapDrawControl *draw_control = nullptr;
 	Camera *camera = nullptr;
@@ -771,6 +807,19 @@ private:
 	// Seconds since m_locked_target_id was last hit; the lock is dropped
 	// after LOCKED_TARGET_TIMEOUT_S seconds without a hit on it.
 	float m_locked_target_timer = 0.0f;
+	// Throttles the locked-target line-of-sight raycast in
+	// updatePointedThing() below (TargetESP) to a fixed interval instead of
+	// running a full extra voxel raycast every single rendered frame the
+	// target is locked and on-screen -- 10/s is already far more than
+	// needed for a highlight effect (nothing else about aiming/hitting
+	// depends on it) and is imperceptible as any added latency. Wall-clock
+	// based (like DiscordRPC/MineBoostPresence's own timers) since
+	// updatePointedThing() doesn't otherwise take dtime. m_locked_target_
+	// los_visible caches the last result so frames that skip the raycast
+	// keep showing whatever was last determined, rather than flickering
+	// the particles off between checks.
+	u64 m_locked_target_los_next_check_ms = 0;
+	bool m_locked_target_los_visible = false;
 
 	/* 'cache'
 	   This class does take ownership/responsibily for cleaning up etc of any of
@@ -900,6 +949,27 @@ Game::Game() :
 
 Game::~Game()
 {
+	// The ImGui-based settings menu (ImGuiMineBoostMenu -- see the
+	// member-declaration comment above) holds a raw Client* via
+	// setClient(), same use-after-free hazard the comment here used to
+	// describe for the old Irrlicht-custom-widget Menu: without clearing
+	// it before "delete client" below runs, the next frame's
+	// ImGuiMineBoostMenu::draw() (still called unconditionally from
+	// ImGuiManager::renderFrame() even with no Client, e.g. back at the
+	// title screen after disconnecting) could dereference a dangling
+	// pointer the moment anything in it tried to use m_client. close()
+	// first too, same reasoning as the old code: nothing stops the
+	// player from disconnecting with the settings menu still open.
+	ImGuiMineBoostMenu::get().close();
+	ImGuiMineBoostMenu::get().setClient(nullptr);
+#if 0 // MineBoost: ClientChat temporarily disabled -- see the comment on
+      // the "gui/guiClientChat.h" include above.
+	if (clientchat_window) {
+		clientchat_window->closeChat();
+		clientchat_window->remove();
+	}
+#endif
+
 	delete client;
 	delete soundmaker;
 	sound_manager.reset();
@@ -996,6 +1066,7 @@ void Game::configureDiscordActivity(const std::string &details,
 	m_discord_last_large_text_sent.clear();
 	m_discord_last_hidden = false;
 	m_discord_configured = true;
+	discord_activity_check_timer = 0; // next per-frame call still re-evaluates immediately after this
 	updateDiscordActivity(true);
 }
 
@@ -1081,7 +1152,7 @@ void Game::run()
 		// Calculate dtime =
 		//    m_rendering_engine->run() from this iteration
 		//  + Sleep time until the wanted FPS are reached
-		draw_times.limit(device, &dtime, g_menumgr.pausesGame());
+		draw_times.limit(device, &dtime);
 
 		framemarker.start();
 
@@ -1109,8 +1180,16 @@ void Game::run()
 			break;
 
 		DiscordRPC::get().poll();
-		if (m_discord_configured)
-			updateDiscordActivity(false);
+		if (m_discord_configured) {
+			// See discord_activity_check_timer's declaration above: only
+			// re-evaluate/resend Discord presence a few times a second
+			// instead of on every rendered frame.
+			discord_activity_check_timer -= dtime;
+			if (discord_activity_check_timer <= 0.0f) {
+				discord_activity_check_timer = 1.0f;
+				updateDiscordActivity(false);
+			}
+		}
 
 		processQueues();
 
@@ -1491,7 +1570,15 @@ bool Game::initGui()
 
 	manager = new SpriteManager(guienv, guienv->getRootGUIElement(), -1, &g_menumgr, client);
 
-	menu = new Menu(guienv, guienv->getRootGUIElement(), -1, &g_menumgr, client);
+	// See the "Menu* menu" member-declaration comment above -- the
+	// settings menu is the ImGui-based ImGuiMineBoostMenu singleton now,
+	// not a per-Game-session object to construct here.
+	ImGuiMineBoostMenu::get().setClient(client);
+
+#if 0 // MineBoost: ClientChat temporarily disabled -- see the comment on
+      // the "gui/guiClientChat.h" include above.
+	clientchat_window = new GUIClientChat(guienv, guienv->getRootGUIElement(), -1, &g_menumgr);
+#endif
 
 	if (shouldShowTouchControls()) {
 		g_touchcontrols = new TouchControls(device, texture_src);
@@ -1996,9 +2083,28 @@ void Game::processKeyInput()
 		toggleFast();
 	} else if (wasKeyDown(KeyType::SPRITES)) {
 		manager->create();
+#if 0 // MineBoost: ClientChat temporarily disabled -- see the comment on
+      // the "gui/guiClientChat.h" include above. Menu-opening on this key
+      // now happens unconditionally in MyEventReceiver::OnEvent() (see
+      // src/client/inputhandler.cpp), not here -- so this branch, if
+      // ClientChat is ever restored, should NOT also open the menu
+      // (that would double-handle the same keypress); it only needs to
+      // close ClientChat if the settings menu is being opened over it,
+      // same mutual-exclusion idea the old code had, just adapted to
+      // however the then-current menu system exposes "is it open".
 	} else if (wasKeyDown(KeyType::MENU)) {
-		menu->create();
+		if (clientchat_window->isChatOpen())
+			clientchat_window->closeChat();
+	} else if (wasKeyDown(KeyType::CLIENTCHAT)) {
+		if (clientchat_window->isChatOpen()) {
+			clientchat_window->closeChat();
+		} else {
+			clientchat_window->openChat();
+		}
 	} else if (wasKeyDown(KeyType::NOCLIP)) {
+#else
+	} else if (wasKeyDown(KeyType::NOCLIP)) {
+#endif
 		toggleNoClip();
 	} else if (wasKeyDown(KeyType::LEFT_HAND)) {
 		bool p = g_settings->getBool("left_hand");
@@ -2684,9 +2790,16 @@ inline void Game::step(f32 dtime)
 	ZoneScoped;
 
 	if (server) {
-		float fps_max = (!device->isWindowFocused() || g_menumgr.pausesGame()) ?
-				g_settings->getFloat("fps_max_unfocused") :
-				g_settings->getFloat("fps_max");
+		// Same "focus decides fps_max vs fps_max_unfocused, nothing else"
+		// reasoning as FpsControl::limit() (src/client/renderingengine.h/
+		// .cpp) -- g_menumgr.pausesGame() used to also drop this to
+		// fps_max_unfocused whenever a modal menu was open, even though
+		// the window was still focused. Server pause handling itself is
+		// unaffected: it's driven by m_is_paused below regardless, this
+		// only decided which tick-rate number to pass alongside it.
+		float fps_max = device->isWindowFocused() ?
+				g_settings->getFloat("fps_max") :
+				g_settings->getFloat("fps_max_unfocused");
 		fps_max = std::max(fps_max, 1.0f);
 		/*
 		 * Unless you have a barebones game, running the server at more than 60Hz
@@ -3560,14 +3673,27 @@ PointedThing Game::updatePointedThing(
 
 			auto is_frustum_culled = camera->getFrustumCuller();
 			if (!is_frustum_culled(target_pos, BS)) {
-				core::line3d<f32> los_line(camera->getPosition(), target_pos);
-				RaycastState los(los_line, false, true, std::nullopt);
-				PointedThing los_result;
-				env.continueRaycast(&los, &los_result);
+				// The frustum check above is cheap (bounds test, no map
+				// access) and stays per-frame for correctness -- a target
+				// that just left the view shouldn't show stale particles
+				// for up to 100ms. The line-of-sight raycast below is the
+				// expensive part (walks the voxel map), so it's throttled;
+				// see m_locked_target_los_next_check_ms's declaration above.
+				u64 now_ms = porting::getTimeMs();
+				if (now_ms >= m_locked_target_los_next_check_ms) {
+					m_locked_target_los_next_check_ms = now_ms + 100;
 
-				// A node hit before reaching the target means something
-				// solid is blocking the view.
-				if (los_result.type != POINTEDTHING_NODE) {
+					core::line3d<f32> los_line(camera->getPosition(), target_pos);
+					RaycastState los(los_line, false, true, std::nullopt);
+					PointedThing los_result;
+					env.continueRaycast(&los, &los_result);
+
+					// A node hit before reaching the target means something
+					// solid is blocking the view.
+					m_locked_target_los_visible = los_result.type != POINTEDTHING_NODE;
+				}
+
+				if (m_locked_target_los_visible) {
 					hud->target_is_player = true;
 					final_target_id = m_locked_target_id;
 				}
@@ -4418,6 +4544,17 @@ void Game::drawScene(ProfilerGraph *graph, RunStats *stats)
 					core::rect<s32>(0, 0, screensize.X, screensize.Y),
 					NULL);
 	}
+
+	// MineBoost: Dear ImGui integration (see src/gui/ImGuiManager.h) --
+	// after every other draw call this frame (so ImGui's own windows
+	// draw on top of everything, same as the existing GUI/HUD do), but
+	// still before driver->endScene() below actually presents the frame.
+	// A no-op unless the demo/test window has been toggled on (see the
+	// "keymap_imgui_demo" keybind, src/client/inputhandler.cpp) -- no
+	// real menu has been migrated onto ImGui yet, so under normal play
+	// this does nothing every frame except the two cheap null/bool
+	// checks at the top of ImGuiManager::renderFrame().
+	ImGuiManager::get().renderFrame(this->driver);
 
 	this->driver->endScene();
 
