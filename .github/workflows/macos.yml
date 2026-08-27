@@ -5,18 +5,6 @@ on:
   push:
     paths:
     pull_request:
-    paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - 'irr/**.mm' # Objective-C(++)
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'po/**.po'
-      - '.github/workflows/macos.yml'
 
 jobs:
   build-intel-macos:

@@ -5,18 +5,6 @@ on:
   push:
     paths:
     pull_request:
-    paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'po/**.po'
-      - 'android/**'
-      - '.github/workflows/android.yml'
 
 jobs:
   build:

@@ -5,19 +5,6 @@ on:
   push:
     paths:
     pull_request:
-    paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'po/**.po'
-      - 'util/buildbot/**'
-      - 'misc/*.manifest'
-      - '.github/workflows/windows.yml'
 
 jobs:
   mingw:
