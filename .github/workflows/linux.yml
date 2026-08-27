@@ -4,18 +4,7 @@ name: linux
 on:
   push:
     paths:
-      - 'lib/**.[ch]'
-      - 'lib/**.cpp'
-      - 'src/**.[ch]'
-      - 'src/**.cpp'
-      - 'irr/**.[ch]'
-      - 'irr/**.cpp'
-      - '**/CMakeLists.txt'
-      - 'cmake/Modules/**'
-      - 'po/**.po'
-      - 'util/ci/**'
-      - '.github/workflows/linux.yml'
-  pull_request:
+    pull_request:
     paths:
       - 'lib/**.[ch]'
       - 'lib/**.cpp'

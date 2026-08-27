@@ -6,15 +6,7 @@ name: whitespace_checks
 on:
   push:
     paths:
-      - '**.txt'
-      - '**.md'
-      - '**.[ch]'
-      - '**.cpp'
-      - '**.hpp'
-      - '**.sh'
-      - '**.cmake'
-      - '**.glsl'
-  pull_request:
+    pull_request:
     paths:
       - '**.txt'
       - '**.md'
