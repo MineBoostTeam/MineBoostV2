@@ -5,7 +5,6 @@ on:
   push:
     paths:
   pull_request:
-
 env:
   MINETEST_POSTGRESQL_CONNECT_STRING: 'host=localhost user=minetest password=minetest dbname=minetest'
 
@@ -118,7 +117,11 @@ jobs:
       - name: Install deps
         run: |
           source ./util/ci/common.sh
-          install_linux_deps clang-11
+          # civetweb + libcivetweb-dev: required by build_prometheus_cpp.sh
+          # below -- see the comment in that script for why (upstream
+          # prometheus-cpp now requires a system-installed civetweb, not
+          # just its own vendored submodule copy).
+          install_linux_deps clang-11 civetweb libcivetweb-dev
 
       - name: Build prometheus-cpp
         run: ./util/ci/build_prometheus_cpp.sh
