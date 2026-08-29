@@ -704,8 +704,13 @@ if(BUILD_CLIENT)
 		# PROJECT_NAME itself: PROJECT_NAME feeds RUN_IN_PLACE's share/
 		# and user/ directory names, the macOS bundle name, etc. further
 		# down this file, none of which should change just because the
-		# .exe's filename does.
-		set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "mbv2")
+		# .exe's filename does. CLIENT_OUTPUT_NAME is set once, in the
+		# top-level CMakeLists.txt, and also drives the macOS .app bundle
+		# path (BUNDLE_NAME there) -- keep using that variable rather than
+		# a second hardcoded "mbv2" literal here, or the two can silently
+		# drift apart again (that's exactly what caused fixup_bundle() to
+		# fail on macOS with "not a valid bundle").
+		set_target_properties(${PROJECT_NAME} PROPERTIES OUTPUT_NAME "${CLIENT_OUTPUT_NAME}")
 	endif()
 
 
