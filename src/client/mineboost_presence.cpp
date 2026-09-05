@@ -123,7 +123,7 @@ void MineBoostPresence::step(float dtime, const std::string &own_name)
 	req.caller = m_http_caller;
 	req.method = HTTP_POST;
 	req.raw_data = fastWriteJson(req_body);
-	req.extra_headers.push_back("Content-Type: application/json");
+	req.extra_headers.emplace_back("Content-Type: application/json");
 	// Generous but bounded -- a slow/asleep free-tier host (e.g. Replit
 	// spinning up from idle) shouldn't hang this longer than a couple of
 	// poll intervals' worth, and a stuck request would otherwise block
