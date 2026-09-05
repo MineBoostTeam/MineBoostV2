@@ -1,36 +1,19 @@
 name: linux
 
-# build on c/cpp changes or workflow changes
+# Run on every commit (push) and every pull request
 on:
   push:
-    paths:
   pull_request:
 env:
   MINETEST_POSTGRESQL_CONNECT_STRING: 'host=localhost user=minetest password=minetest dbname=minetest'
 
 jobs:
-  # Older gcc version (should be close to our minimum supported version)
-  gcc_7:
-    runs-on: ubuntu-20.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install deps
-        run: |
-          source ./util/ci/common.sh
-          install_linux_deps g++-7
-
-      - name: Build
-        run: |
-          ./util/ci/build.sh
-        env:
-          CC: gcc-7
-          CXX: g++-7
-          # Test fallback SHA implementations
-          CMAKE_FLAGS: '-DENABLE_OPENSSL=0'
-
-      - name: Test
-        run: |
-          ./bin/mbv2 --run-unittests
+  # NOTE: gcc_7 (ubuntu-20.04) was removed here -- ubuntu-20.04 was fully
+  # retired by GitHub Actions on 2025-04-15, so the job could never be
+  # scheduled and sat "waiting" forever. If minimum-gcc-version coverage
+  # is still wanted, re-add it on a supported image with an old gcc
+  # installed via apt (e.g. ubuntu-22.04 + g++-9/g++-10, whichever is the
+  # oldest still packaged).
 
   # Current gcc version
   gcc_14:
@@ -56,32 +39,8 @@ jobs:
           cd nowrite
           ../bin/mbv2 --run-unittests
 
-  # Older clang version (should be close to our minimum supported version)
-  clang_7:
-    runs-on: ubuntu-20.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install deps
-        run: |
-          source ./util/ci/common.sh
-          install_linux_deps clang-7 llvm-7
-
-      - name: Build
-        run: |
-          ./util/ci/build.sh
-        env:
-          CC: clang-7
-          CXX: clang++-7
-          CMAKE_FLAGS: '-DCMAKE_C_FLAGS="-fsanitize=address" -DCMAKE_CXX_FLAGS="-fsanitize=address"'
-
-      - name: Unittest
-        run: |
-          ./bin/mbv2 --run-unittests
-
-      # Do this here because we have ASan and error paths are sensitive to dangling pointers
-      - name: Test error cases
-        run: |
-          ./util/test_error_cases.sh
+  # NOTE: clang_7 (ubuntu-20.04) was removed here for the same reason as
+  # gcc_7 above -- ubuntu-20.04 is retired and the job could never run.
 
   # Current clang version
   clang_18:

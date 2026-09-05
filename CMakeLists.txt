@@ -11,6 +11,10 @@ set(CMAKE_SUPPRESS_REGENERATION ON)
 # This can be read from ${PROJECT_NAME} after project() is called
 project(luanti)
 set(PROJECT_NAME_CAPITALIZED "MineBoostV2")
+# Filename (without extension) of the built client binary, e.g. "mbv2" ->
+# "mbv2"/"mbv2.exe". See the comment above the OUTPUT_NAME usage in
+# src/CMakeLists.txt for why this is kept separate from PROJECT_NAME.
+set(CLIENT_OUTPUT_NAME "mbv2")
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
