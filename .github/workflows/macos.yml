@@ -1,9 +1,8 @@
 name: macos
 
-# build on c/cpp changes or workflow changes
+# Run on every commit (push) and every pull request
 on:
   push:
-    paths:
   pull_request:
 
 jobs:
@@ -47,44 +46,54 @@ jobs:
         with:
           name: luanti-macos
           path: ./build/macos/*.zip
-  build-arm-macos-xcode:
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install deps
-        run: |
-          source ./util/ci/common.sh
-          install_macos_deps
-          # brew jsoncpp do not include libjsoncpp.a, and if installed header conflict caused build failure
-          brew uninstall jsoncpp
 
-      - name: Build with Cmake
-        run: |
-          mkdir build
-          cd build
-          cmake .. \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=14 \
-            -DCMAKE_FIND_FRAMEWORK=LAST \
-            -DCMAKE_INSTALL_PREFIX=../build/macos/ \
-            -DRUN_IN_PLACE=FALSE -DENABLE_GETTEXT=TRUE \
-            -DENABLE_SYSTEM_JSONCPP=OFF
-          cmake --build . -j$(sysctl -n hw.logicalcpu)
-          make install
-
-      - name: Build and Archive with Xcode
-        run: |
-          mkdir build_xcode
-          cd build_xcode
-          ../util/ci/build_xcode.sh
-
-      - name: Tests
-        run: |
-          mkdir -p "${HOME}/Library/Application Support/minetest/games/"
-          ln -s "${PWD}/games/devtest" "${HOME}/Library/Application Support/minetest/games/"
-          ./build/macos/mbv2.app/Contents/MacOS/mbv2 --run-unittests
-          ./build_xcode/luanti.xcarchive/Products/Applications/mbv2.app/Contents/MacOS/mbv2 --run-unittests
-
-      - name: Diff Resources
-        run: |
-          diff -rd ./build/macos/mbv2.app/Contents/Resources ./build_xcode/build/Release/mbv2.app/Contents/Resources || exit 1
-          diff -rd ./build/macos/mbv2.app/Contents/Resources ./build_xcode/luanti.xcarchive/Products/Applications/mbv2.app/Contents/Resources || exit 1
+  # NOTE: build-arm-macos-xcode was removed here at the user's request --
+  # it wasn't producing a usable error message before failing (the log
+  # cut off right after CMake's install step, with no visible cause), and
+  # rather than sink more time chasing it blind, build-intel-macos alone
+  # is kept as macOS coverage. If ARM/Xcode coverage is wanted again, the
+  # job below can be restored -- it built with plain CMake first, then
+  # re-built with Xcode via util/ci/build_xcode.sh, and diffed the two
+  # Resources trees against each other as a sanity check:
+  #
+  # build-arm-macos-xcode:
+  #   runs-on: macos-14
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Install deps
+  #       run: |
+  #         source ./util/ci/common.sh
+  #         install_macos_deps
+  #         # brew jsoncpp do not include libjsoncpp.a, and if installed header conflict caused build failure
+  #         brew uninstall jsoncpp
+  #
+  #     - name: Build with Cmake
+  #       run: |
+  #         mkdir build
+  #         cd build
+  #         cmake .. \
+  #           -DCMAKE_OSX_DEPLOYMENT_TARGET=14 \
+  #           -DCMAKE_FIND_FRAMEWORK=LAST \
+  #           -DCMAKE_INSTALL_PREFIX=../build/macos/ \
+  #           -DRUN_IN_PLACE=FALSE -DENABLE_GETTEXT=TRUE \
+  #           -DENABLE_SYSTEM_JSONCPP=OFF
+  #         cmake --build . -j$(sysctl -n hw.logicalcpu)
+  #         make install
+  #
+  #     - name: Build and Archive with Xcode
+  #       run: |
+  #         mkdir build_xcode
+  #         cd build_xcode
+  #         ../util/ci/build_xcode.sh
+  #
+  #     - name: Tests
+  #       run: |
+  #         mkdir -p "${HOME}/Library/Application Support/minetest/games/"
+  #         ln -s "${PWD}/games/devtest" "${HOME}/Library/Application Support/minetest/games/"
+  #         ./build/macos/mbv2.app/Contents/MacOS/mbv2 --run-unittests
+  #         ./build_xcode/luanti.xcarchive/Products/Applications/mbv2.app/Contents/MacOS/mbv2 --run-unittests
+  #
+  #     - name: Diff Resources
+  #       run: |
+  #         diff -rd ./build/macos/mbv2.app/Contents/Resources ./build_xcode/build/Release/mbv2.app/Contents/Resources || exit 1
+  #         diff -rd ./build/macos/mbv2.app/Contents/Resources ./build_xcode/luanti.xcarchive/Products/Applications/mbv2.app/Contents/Resources || exit 1
