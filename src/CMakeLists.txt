@@ -221,16 +221,37 @@ if(ENABLE_PROMETHEUS)
 	find_path(PROMETHEUS_CPP_INCLUDE_DIR NAMES prometheus/counter.h)
 	find_library(PROMETHEUS_PULL_LIBRARY NAMES prometheus-cpp-pull)
 	find_library(PROMETHEUS_CORE_LIBRARY NAMES prometheus-cpp-core)
-	# prometheus-cpp-pull's Exposer is implemented on top of civetweb
-	# (CivetServer/CivetHandler/mg_*), so that library must be linked too
-	# or every symbol it uses comes back as "undefined reference" at
-	# link time.
-	find_library(CIVETWEB_LIBRARY NAMES civetweb)
-	if(PROMETHEUS_CPP_INCLUDE_DIR AND PROMETHEUS_PULL_LIBRARY AND PROMETHEUS_CORE_LIBRARY AND CIVETWEB_LIBRARY)
-		set(PROMETHEUS_LIBRARIES ${PROMETHEUS_PULL_LIBRARY} ${PROMETHEUS_CORE_LIBRARY} ${CIVETWEB_LIBRARY})
+	# prometheus-cpp-pull's Exposer is implemented on top of civetweb's
+	# CivetServer/CivetHandler C++ wrapper, which is a library SEPARATE
+	# from civetweb's own mg_* C library. Debian's libcivetweb-dev ships
+	# both, but only as CMake package-config imported targets
+	# (civetweb::civetweb and civetweb::civetweb-cpp) -- there is no
+	# plain "libcivetweb-cpp.so"/.a file for find_library() to locate by
+	# name, which is why a previous find_library(NAMES civetweb) attempt
+	# here only ever picked up the mg_* half and still left every
+	# CivetServer/CivetHandler symbol undefined at link time. Use
+	# find_package() instead, exactly like prometheus-cpp's own
+	# CMakeLists.txt does (find_package(civetweb)).
+	find_package(civetweb CONFIG QUIET)
+	# prometheus-cpp-pull's HTTP handler gzip-compresses responses using
+	# zlib's deflate()/deflateInit2_()/deflateEnd() directly, so zlib has
+	# to be linked too. ZLIB_LIBRARIES is also set up later in this file
+	# (see the unconditional find_package(ZLIB REQUIRED) below) and
+	# already linked into both the client and server targets -- but that
+	# happens further down, after this prometheus block runs, and on the
+	# linker command line zlib needs to come *after* this static archive
+	# that references it (ld resolves symbols left-to-right and won't go
+	# back for an earlier-listed library). Calling find_package(ZLIB)
+	# here too (harmless/idempotent -- CMake just reuses the cached
+	# result the second time) lets zlib be appended into
+	# PROMETHEUS_LIBRARIES itself, in the right position. Verified
+	# end-to-end against a real prometheus-cpp build.
+	find_package(ZLIB QUIET)
+	if(PROMETHEUS_CPP_INCLUDE_DIR AND PROMETHEUS_PULL_LIBRARY AND PROMETHEUS_CORE_LIBRARY AND TARGET civetweb::civetweb-cpp AND ZLIB_FOUND)
+		set(PROMETHEUS_LIBRARIES ${PROMETHEUS_PULL_LIBRARY} ${PROMETHEUS_CORE_LIBRARY} civetweb::civetweb-cpp ${ZLIB_LIBRARIES})
 		set(USE_PROMETHEUS TRUE)
 		include_directories(${PROMETHEUS_CPP_INCLUDE_DIR})
-	endif(PROMETHEUS_CPP_INCLUDE_DIR AND PROMETHEUS_PULL_LIBRARY AND PROMETHEUS_CORE_LIBRARY AND CIVETWEB_LIBRARY)
+	endif(PROMETHEUS_CPP_INCLUDE_DIR AND PROMETHEUS_PULL_LIBRARY AND PROMETHEUS_CORE_LIBRARY AND TARGET civetweb::civetweb-cpp AND ZLIB_FOUND)
 endif(ENABLE_PROMETHEUS)
 
 if(USE_PROMETHEUS)
