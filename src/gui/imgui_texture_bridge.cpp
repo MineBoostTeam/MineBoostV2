@@ -5,7 +5,32 @@
 
 #include "imgui_texture_bridge.h"
 
+// Same GL-header selection logic as lib/imgui/backends/imgui_impl_opengl3.h
+// uses to decide between its bundled desktop-GL loader and real platform
+// GLES headers -- deliberately duplicated (rather than including that
+// header) because this file only needs a handful of plain texture calls
+// and pulling in the rest of the OpenGL3 backend's declarations here
+// would be overkill. This match matters: imgui_impl_opengl3_loader.h
+// (included in the '#else' branch below) is the loader ImGui's own
+// OpenGL3 backend auto-detects it should skip on Android/iOS (see
+// IMGUI_IMPL_OPENGL_ES3 in imgui_impl_opengl3.h) -- it unconditionally
+// takes a desktop gl3w-style path with no Android/ES3 branching of its
+// own, requiring imgl3wInit() to have populated a global "imgl3wProcs"
+// table before any GL call in it can run. That init only happens inside
+// imgui_impl_opengl3.cpp, and only on the desktop platforms that
+// actually take that path -- on Android nothing ever defines
+// "imgl3wProcs", so directly including this loader here as this file
+// used to do left every plain GL call below referencing a symbol that
+// doesn't exist anywhere in the link, however harmless it looked (it
+// compiles fine; it only fails at link time).
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+#if (defined(__APPLE__) && (TARGET_OS_IOS || TARGET_OS_TV)) || defined(__ANDROID__)
+#include <GLES3/gl3.h> // plain glGenTextures()/glTexImage2D()/etc.
+#else
 #include "imgui_impl_opengl3_loader.h" // plain glGenTextures()/glTexImage2D()/etc.
+#endif
 #include "ITexture.h"
 #include "log.h"
 

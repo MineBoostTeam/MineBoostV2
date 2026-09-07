@@ -5,8 +5,8 @@
 //
 // Deliberately built ONLY on ITexture's public API (lock()/unlock()/
 // getColorFormat()/getSize()/getPitch(), all in irr/include/ITexture.h)
-// plus the plain OpenGL functions ImGui's own bundled loader already
-// resolved (see lib/imgui/backends/imgui_impl_opengl3_loader.h) -- NOT
+// plus a handful of plain OpenGL calls (see the platform-specific GL
+// header selection at the top of imgui_texture_bridge.cpp) -- NOT
 // by reaching into IrrlichtMt's private per-driver texture
 // implementation classes (irr/src/COpenGLCoreTexture.h and friends).
 // Those *do* expose a raw GL texture handle (getOpenGLTextureName()),
