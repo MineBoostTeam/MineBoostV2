@@ -502,7 +502,18 @@ target_link_libraries(IrrlichtMt PRIVATE
 	${EGL_LIBRARY}
 
 	# incl. transitive SDL2 dependencies for static linking
-	"$<$<PLATFORM_ID:Android>:-landroid -llog -lGLESv2 -lGLESv1_CM -lOpenSLES>"
+	#
+	# GLESv3 (as well as GLESv2) is needed here: ImGui's OpenGL3 backend
+	# auto-detects Android and uses real OpenGL ES 3 entry points (see
+	# IMGUI_IMPL_OPENGL_ES3 in lib/imgui/backends/imgui_impl_opengl3.h) --
+	# specifically vertex array objects (glGenVertexArrays/
+	# glBindVertexArray/glDeleteVertexArrays) and glBindSampler, none of
+	# which exist in ES2. On Android those ES3 entry points are exported
+	# from a separate stub library, libGLESv3.so, NOT libGLESv2.so (which
+	# only carries ES2 stubs even though the underlying driver supports
+	# ES3) -- omitting it left every one of those symbols undefined at
+	# link time.
+	"$<$<PLATFORM_ID:Android>:-landroid -llog -lGLESv2 -lGLESv3 -lGLESv1_CM -lOpenSLES>"
 	${COCOA_LIB}
 	${IOKIT_LIB}
 	"$<$<PLATFORM_ID:Windows>:gdi32>"
