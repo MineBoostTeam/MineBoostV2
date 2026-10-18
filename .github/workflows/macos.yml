@@ -7,8 +7,10 @@ on:
 
 jobs:
   build-intel-macos:
-    # use lowest possible macOS running on x86_64 supported by brew to support more users
-    runs-on: macos-13
+    # macos-13 runners were retired by GitHub, so jobs targeting them never get
+    # picked up. macos-15-intel is the remaining x86_64 image; the deployment
+    # target below keeps the built app compatible with older macOS versions.
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - name: Install deps
