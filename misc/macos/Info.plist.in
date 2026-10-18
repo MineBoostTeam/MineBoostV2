@@ -5,9 +5,9 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>English</string>
 	<key>CFBundleExecutable</key>
-	<string>luanti</string>
+	<string>@CLIENT_OUTPUT_NAME@</string>
 	<key>CFBundleIconFile</key>
-	<string>luanti-icon.icns</string>
+	<string>mbv2-icon.icns</string>
 	<key>CFBundleName</key>
 	<string>@PROJECT_NAME_CAPITALIZED@</string>
 	<key>CFBundleDisplayName</key>

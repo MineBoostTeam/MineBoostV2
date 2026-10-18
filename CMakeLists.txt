@@ -158,7 +158,10 @@ if(WIN32)
 	set(EXAMPLE_CONF_DIR ".")
 	set(LOCALEDIR "locale")
 elseif(APPLE)
-	set(BUNDLE_NAME ${PROJECT_NAME}.app)
+	# Must match the client target's OUTPUT_NAME (see src/CMakeLists.txt):
+	# CMake names the .app after it, not after PROJECT_NAME, so using
+	# PROJECT_NAME here makes fixup_bundle() fail with "not a valid bundle".
+	set(BUNDLE_NAME ${CLIENT_OUTPUT_NAME}.app)
 	set(BUNDLE_PATH "${BUNDLE_NAME}")
 	set(BINDIR ${BUNDLE_NAME}/Contents/MacOS)
 	set(SHAREDIR ${BUNDLE_NAME}/Contents/Resources)
