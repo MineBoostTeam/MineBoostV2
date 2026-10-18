@@ -374,6 +374,25 @@ if(WIN32)
 					CXX_STANDARD 20
 					CXX_STANDARD_REQUIRED ON
 			)
+			if(MSVC)
+				# MSVC STL error STL1011 (C2338): when C++/WinRT's base.h
+				# doesn't see native C++20 coroutine support
+				# (__cpp_lib_coroutine), it falls back to the deprecated
+				# <experimental/coroutine> header, which the STL turns into
+				# a hard static_assert. CMake < 3.20 doesn't translate
+				# CXX_STANDARD 20 into /std:c++20 for MSVC, so the file can
+				# silently stay on /std:c++17. Force C++20 for this one
+				# file explicitly (the last /std flag wins over the global
+				# one) so <coroutine> is used, and silence the deprecation
+				# as a safety net for toolchains that still pick the
+				# experimental headers.
+				set_source_files_properties(
+					"${CMAKE_CURRENT_SOURCE_DIR}/client/nowplaying.cpp"
+					PROPERTIES
+						COMPILE_OPTIONS "/std:c++20"
+						COMPILE_DEFINITIONS "_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS"
+				)
+			endif()
 		else()
 			message(STATUS "winrt/Windows.Media.Control.h not found; MusicHud album art/progress "
 				"will be unavailable on Windows (install mingw-w64-clang-x86_64-cppwinrt)")
