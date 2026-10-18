@@ -1205,10 +1205,20 @@ if(BUILD_CLIENT AND NOT ANDROID)
 	endif()
 
 	if(APPLE)
+		# Directories fixup_bundle() searches for the bundle's dependent
+		# dylibs. Libraries referenced through @rpath (e.g. brotli, pulled in
+		# by freetype, when Homebrew builds from source) can't be resolved
+		# from the bundle itself, which makes `otool -l` fail with
+		# "can't open file: @rpath/libbrotlicommon.1.dylib".
+		set(BUNDLE_SEARCH_DIRS "")
+		foreach(_prefix ${CMAKE_PREFIX_PATH} ${CMAKE_SYSTEM_PREFIX_PATH} /usr/local /opt/homebrew)
+			list(APPEND BUNDLE_SEARCH_DIRS "${_prefix}/lib")
+		endforeach()
+		list(REMOVE_DUPLICATES BUNDLE_SEARCH_DIRS)
 		install(CODE "
 			set(BU_CHMOD_BUNDLE_ITEMS ON)
 			include(BundleUtilities)
-			fixup_bundle(\"\${CMAKE_INSTALL_PREFIX}/${BUNDLE_PATH}\" \"\" \"\${CMAKE_INSTALL_PREFIX}/${BINDIR}\")
+			fixup_bundle(\"\${CMAKE_INSTALL_PREFIX}/${BUNDLE_PATH}\" \"\" \"\${CMAKE_INSTALL_PREFIX}/${BINDIR};${BUNDLE_SEARCH_DIRS}\")
 		" COMPONENT Runtime)
 	endif()
 

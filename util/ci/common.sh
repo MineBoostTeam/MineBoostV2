@@ -44,4 +44,11 @@ install_macos_deps() {
 	brew install --display-times "${pkgs[@]}"
 	brew unlink $(brew ls --formula)
 	brew link "${pkgs[@]}"
+	# Also link the runtime dependencies of those packages (e.g. brotli via
+	# freetype), otherwise fixup_bundle() can't find their dylibs when
+	# packaging the .app. Some may be keg-only, so don't fail on those.
+	local dep
+	for dep in $(brew deps --formula --union "${pkgs[@]}"); do
+		brew link "$dep" || true
+	done
 }
