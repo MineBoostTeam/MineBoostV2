@@ -19,8 +19,6 @@
 
 **MineBoostV2** is a fork of the Luanti (formerly Minetest) engine built for PvP: lower system requirements, better performance on low-end hardware, and extra quality-of-life features for combat.
 
-> **Note:** MineBoostV2 targets **desktop only** (Windows/Linux/macOS). Mobile/Android is not supported.
-
 ## Table of Contents
 
 1. [Community](#community)
