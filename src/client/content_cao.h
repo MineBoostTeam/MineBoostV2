@@ -211,20 +211,6 @@ public:
 		return m_is_visible;
 	}
 
-	/// True for a remote player that the server is deliberately hiding
-	/// (e.g. an invisibility potion): the object is invisible, scaled to
-	/// nothing, or its nametag was made fully transparent. Client-side
-	/// features that would leak the identity of such a player (TargetHUD
-	/// name/skin/HP, target particles) must not be shown for them.
-	inline bool isConcealedPlayer() const
-	{
-		if (!m_is_player || m_is_local_player)
-			return false;
-		return !m_prop.is_visible
-			|| m_prop.nametag_color.getAlpha() == 0
-			|| m_prop.visual_size.X <= 0.0f || m_prop.visual_size.Y <= 0.0f;
-	}
-
 	inline void setVisible(bool toset)
 	{
 		m_is_visible = toset;
