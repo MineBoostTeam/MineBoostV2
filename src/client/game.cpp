@@ -3615,6 +3615,11 @@ PointedThing Game::updatePointedThing(
 				hud->setSelectionRotation(v3f());
 		}
 
+		// A player hidden by the server (invisibility potion etc.) must not
+		// be identified through TargetHUD or the target particles.
+		if (is_player_target && gcao->isConcealedPlayer())
+			is_player_target = false;
+
 		if (is_player_target) {
 			hud->target_is_player = true;
 
@@ -3664,8 +3669,10 @@ PointedThing Game::updatePointedThing(
 	if (!hud->target_is_player && m_locked_target_id != 0) {
 		ClientActiveObject *locked_obj = env.getActiveObject(m_locked_target_id);
 		GenericCAO *locked_gcao = dynamic_cast<GenericCAO*>(locked_obj);
-		if (!locked_gcao || !locked_gcao->isPlayer()) {
-			// Target died, disconnected, or moved out of range.
+		if (!locked_gcao || !locked_gcao->isPlayer() ||
+				locked_gcao->isConcealedPlayer()) {
+			// Target died, disconnected, moved out of range, or became
+			// invisible (don't keep revealing where they are).
 			m_locked_target_id = 0;
 			m_locked_target_timer = 0.0f;
 		} else if (g_settings->getBool("target_highlight_particles")) {
